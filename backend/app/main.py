@@ -1,6 +1,8 @@
 """API entry point. Run from backend/:  uvicorn app.main:app --reload --port 8000
 Set KONSYER_STUB=1 to return a canned reply without calling the model."""
 import os
+import uuid
+from typing import Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -8,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
+from . import executor, wallet
 from .agent.cards import plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -34,6 +37,16 @@ class ChatIn(BaseModel):
     user_id: int = 1
     message: str
     history: list[dict] = []
+
+
+class ActionIn(BaseModel):
+    user_id: int = 1
+
+
+class TopupIn(BaseModel):
+    user_id: int = 1
+    amount_ngwee: int
+    idempotency_key: Optional[str] = None
 
 
 @app.get("/health")
@@ -64,3 +77,68 @@ def chat(body: ChatIn, conn=Depends(db)):
     card = plan_card(conn, r["plan_id"]) if r["plan_id"] else None
     return {"stub": False, "reply": r["reply"], "cards": [card] if card else [],
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
+
+
+# ---------- wallet (sandbox money, not real funds) ----------
+@app.get("/wallet")
+def get_wallet(user_id: int = 1, conn=Depends(db)):
+    p = conn.execute("SELECT autonomy, per_purchase_cap, daily_cap FROM profiles WHERE user_id=?",
+                     (user_id,)).fetchone()
+    if p is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    txns = conn.execute("SELECT amount, kind, ref, created_at FROM wallet_txns WHERE user_id=? "
+                        "ORDER BY id DESC LIMIT 10", (user_id,)).fetchall()
+    return {"sandbox": True, "balance": wallet.balance(conn, user_id),
+            "spent_today": wallet.spent_today(conn, user_id, lusaka_today()),
+            "autonomy": p["autonomy"], "per_purchase_cap": p["per_purchase_cap"], "daily_cap": p["daily_cap"],
+            "recent": [dict(t) for t in txns]}
+
+
+@app.post("/wallet/topup")
+def topup(body: TopupIn, conn=Depends(db)):
+    key = body.idempotency_key or f"topup-{uuid.uuid4()}"
+    try:
+        r = wallet.topup(conn, body.user_id, body.amount_ngwee, key)
+        conn.commit()
+    except wallet.WalletError as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"sandbox": True, **r}
+
+
+# ---------- approvals ----------
+@app.get("/actions/pending")
+def pending(user_id: int = 1, conn=Depends(db)):
+    return {"actions": executor.list_pending(conn, user_id)}
+
+
+def _with_card(conn, user_id, result):
+    row = conn.execute("SELECT plan_id FROM pending_actions WHERE id=? AND user_id=?",
+                       (result["action_id"], user_id)).fetchone()
+    result["card"] = plan_card(conn, row["plan_id"]) if row and row["plan_id"] else None
+    return result
+
+
+def _run(conn, user_id, fn, action_id):
+    try:
+        return _with_card(conn, user_id, fn(conn, user_id, action_id))
+    except executor.ExecError as e:
+        raise HTTPException(status_code=404 if e.code == "not_found" else 409, detail=e.message)
+
+
+@app.post("/actions/{action_id}/approve")
+def approve_action(action_id: int, body: ActionIn, conn=Depends(db)):
+    return _run(conn, body.user_id, executor.approve, action_id)
+
+
+@app.post("/actions/{action_id}/deny")
+def deny_action(action_id: int, body: ActionIn, conn=Depends(db)):
+    return _run(conn, body.user_id, executor.deny, action_id)
+
+
+@app.get("/plans/{plan_id}")
+def get_plan(plan_id: int, user_id: int = 1, conn=Depends(db)):
+    owner = conn.execute("SELECT user_id FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if owner is None or owner["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="plan not found")
+    return {"card": plan_card(conn, plan_id)}

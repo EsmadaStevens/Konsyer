@@ -5,7 +5,7 @@ import json
 import re
 from datetime import timedelta
 
-from .. import policy
+from .. import policy, wallet
 from ..money import fmt_k
 from ..providers.mock import MockRide
 from ..timeutil import fmt_local, local_date, parse_utc, to_local, to_utc_iso
@@ -79,9 +79,7 @@ class Tools:
         return r["balance"] if r else 0
 
     def _spent_today(self):
-        return self.conn.execute(
-            "SELECT COALESCE(-SUM(amount),0) FROM wallet_txns WHERE user_id=? AND kind='purchase' AND date(created_at)=?",
-            (self.user_id, self.today.isoformat())).fetchone()[0]
+        return wallet.spent_today(self.conn, self.user_id, self.today)
 
     def _slots(self, listing_id):
         rows = self.conn.execute("SELECT * FROM slots WHERE listing_id=? ORDER BY starts_at", (listing_id,)).fetchall()

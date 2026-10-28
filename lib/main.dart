@@ -5,12 +5,45 @@ import 'package:http/http.dart' as http;
 // Set with: --dart-define=API_BASE=http://localhost:8000
 // (Android emulator: http://10.0.2.2:8000)
 const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://localhost:8000');
+const userId = 1;
 
 String fmtK(int ngwee) {
-  final whole = ngwee ~/ 100;
-  final frac = ngwee % 100;
+  final sign = ngwee < 0 ? '-' : '';
+  final n = ngwee.abs();
+  final whole = n ~/ 100;
+  final frac = n % 100;
   final s = whole.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',');
-  return frac == 0 ? 'K$s' : 'K$s.${frac.toString().padLeft(2, '0')}';
+  return frac == 0 ? '${sign}K$s' : '${sign}K$s.${frac.toString().padLeft(2, '0')}';
+}
+
+class ApiError implements Exception {
+  final String message;
+  ApiError(this.message);
+  @override
+  String toString() => message;
+}
+
+Map<String, dynamic> _decode(http.Response r) {
+  // Decode bytes as UTF-8 (the default would garble dashes and accents).
+  final j = jsonDecode(utf8.decode(r.bodyBytes));
+  if (r.statusCode != 200) {
+    final d = j is Map ? j['detail'] : null;
+    throw ApiError(d?.toString() ?? 'Server returned ${r.statusCode}');
+  }
+  return j as Map<String, dynamic>;
+}
+
+Future<Map<String, dynamic>> apiGet(String path) async {
+  final r = await http.get(Uri.parse('$apiBase$path')).timeout(const Duration(seconds: 30));
+  return _decode(r);
+}
+
+Future<Map<String, dynamic>> apiPost(String path, Map<String, dynamic> body) async {
+  final r = await http
+      .post(Uri.parse('$apiBase$path'),
+          headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+      .timeout(const Duration(seconds: 60));
+  return _decode(r);
 }
 
 void main() => runApp(const ConciergeApp());
@@ -60,13 +93,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _ctrl.clear();
     });
     try {
-      final r = await http
-          .post(Uri.parse('$apiBase/chat'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'user_id': 1, 'message': text}))
-          .timeout(const Duration(seconds: 60));
-      if (r.statusCode != 200) throw Exception('Server returned ${r.statusCode}');
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = await apiPost('/chat', {'user_id': userId, 'message': text});
       final cards = (j['cards'] as List? ?? []).cast<Map<String, dynamic>>();
       setState(() => _msgs.add(Msg(false, j['reply'] as String? ?? '', cards)));
     } catch (e) {
@@ -84,7 +111,17 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Konsyer')),
+      appBar: AppBar(
+        title: const Text('Konsyer'),
+        actions: [
+          IconButton(
+            tooltip: 'Wallet',
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const WalletScreen())),
+          ),
+        ],
+      ),
       body: Column(children: [
         Expanded(
           child: ListView.builder(
@@ -149,32 +186,110 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-class PlanCard extends StatelessWidget {
+class PlanCard extends StatefulWidget {
   final Map<String, dynamic> c;
   const PlanCard(this.c, {super.key});
   @override
+  State<PlanCard> createState() => _PlanCardState();
+}
+
+class _PlanCardState extends State<PlanCard> {
+  late Map<String, dynamic> c;
+  int? busyId;
+
+  @override
+  void initState() {
+    super.initState();
+    c = widget.c;
+  }
+
+  void _toast(String msg) {
+    if (!mounted || msg.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _act(int id, String verb) async {
+    setState(() => busyId = id);
+    try {
+      final j = await apiPost('/actions/$id/$verb', {'user_id': userId});
+      if (mounted && j['card'] is Map) {
+        setState(() => c = (j['card'] as Map).cast<String, dynamic>());
+      }
+      _toast(j['message']?.toString() ?? '');
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busyId = null);
+    }
+  }
+
+  Widget _item(Map<String, dynamic> i) {
+    final cs = Theme.of(context).colorScheme;
+    final small = Theme.of(context).textTheme.bodySmall;
+    final id = i['action_id'] as int?;
+    final status = (i['status'] ?? '').toString();
+    final decision = i['decision']?.toString();
+    final reason = i['reason']?.toString();
+    final busy = id != null && busyId == id;
+    final open = id != null && (status == 'pending' || status == 'approved');
+
+    Widget? footer;
+    if (open) {
+      footer = Wrap(spacing: 8, children: [
+        FilledButton(
+          onPressed: busy ? null : () => _act(id, 'approve'),
+          child: Text(busy ? 'Working...' : 'Approve'),
+        ),
+        OutlinedButton(
+          onPressed: busy ? null : () => _act(id, 'deny'),
+          child: const Text('Decline'),
+        ),
+      ]);
+    } else if (status == 'executed') {
+      footer = Text('Done (sandbox wallet)', style: small?.copyWith(color: Colors.greenAccent));
+    } else if (status == 'denied') {
+      footer = Text(decision == 'DENY' ? 'Blocked by your limits. Nothing charged.' : 'Declined. Nothing charged.',
+          style: small?.copyWith(color: cs.error));
+    } else if (status == 'failed') {
+      footer = Text('Failed. Nothing charged.', style: small?.copyWith(color: cs.error));
+    }
+
+    final showReason = reason != null && reason.isNotEmpty && (open || status == 'denied');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          SizedBox(width: 48, child: Text((i['time'] ?? '').toString())),
+          Expanded(child: Text((i['label'] ?? '').toString())),
+          Text(fmtK((i['amount'] as num).toInt())),
+        ]),
+        if (showReason)
+          Padding(
+            padding: const EdgeInsets.only(left: 48, top: 2),
+            child: Text(reason, style: small?.copyWith(color: cs.onSurfaceVariant)),
+          ),
+        if (footer != null)
+          Padding(padding: const EdgeInsets.only(left: 48, top: 6), child: footer),
+      ]),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final items = (c['items'] as List).cast<Map<String, dynamic>>();
-    final total = c['total'] as int;
-    final budget = c['budget'] as int;
+    final total = (c['total'] as num).toInt();
+    final budget = (c['budget'] as num).toInt();
+    final small = Theme.of(context).textTheme.labelSmall;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c['title'] as String, style: Theme.of(context).textTheme.titleMedium),
-          if (c['sample_data'] == true)
-            Text('Sample data', style: Theme.of(context).textTheme.labelSmall),
+          if (c['sample_data'] == true) Text('Sample data', style: small),
+          Text('Sandbox wallet: no real money moves', style: small),
           const Divider(),
-          for (final i in items)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(children: [
-                SizedBox(width: 48, child: Text(i['time'] as String)),
-                Expanded(child: Text(i['label'] as String)),
-                Text(fmtK(i['amount'] as int)),
-              ]),
-            ),
+          for (final i in items) _item(i),
           const Divider(),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             const Text('Total'),
@@ -183,6 +298,95 @@ class PlanCard extends StatelessWidget {
           ]),
         ]),
       ),
+    );
+  }
+}
+
+class WalletScreen extends StatefulWidget {
+  const WalletScreen({super.key});
+  @override
+  State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen> {
+  Map<String, dynamic>? w;
+  String? error;
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final j = await apiGet('/wallet?user_id=$userId');
+      if (mounted) setState(() { w = j; error = null; });
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    }
+  }
+
+  Future<void> _topup(int ngwee) async {
+    setState(() => busy = true);
+    try {
+      await apiPost('/wallet/topup', {
+        'user_id': userId,
+        'amount_ngwee': ngwee,
+        'idempotency_key': 'ui-${DateTime.now().microsecondsSinceEpoch}',
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final j = w;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Wallet')),
+      body: error != null
+          ? Center(child: Text('Could not load wallet: $error'))
+          : j == null
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(padding: const EdgeInsets.all(16), children: [
+                    Text('Sandbox wallet: test money only', style: t.labelMedium),
+                    const SizedBox(height: 8),
+                    Text(fmtK((j['balance'] as num).toInt()), style: t.displaySmall),
+                    Text('Spent today: ${fmtK((j['spent_today'] as num).toInt())}'),
+                    const SizedBox(height: 12),
+                    Text('Your limits', style: t.titleSmall),
+                    Text('Per purchase: ${fmtK((j['per_purchase_cap'] as num).toInt())}'),
+                    Text('Per day: ${fmtK((j['daily_cap'] as num).toInt())}'),
+                    Text('Approval mode: ${j['autonomy']}'),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: busy ? null : () => _topup(50000),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add K500 (sandbox)'),
+                    ),
+                    const SizedBox(height: 20),
+                    Text('Recent activity', style: t.titleSmall),
+                    const Divider(),
+                    for (final x in (j['recent'] as List).cast<Map<String, dynamic>>())
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text((x['ref'] ?? x['kind']).toString()),
+                        subtitle: Text((x['created_at'] ?? '').toString()),
+                        trailing: Text(fmtK((x['amount'] as num).toInt())),
+                      ),
+                  ]),
+                ),
     );
   }
 }

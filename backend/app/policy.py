@@ -81,7 +81,8 @@ def decide(limits: Limits, ctx: Context, action: Action) -> Decision:
     if action.trust_score < MIN_TRUST:
         return Decision(Verdict.CONFIRM, "low_trust", "This listing has a low trust score, so you need to approve it.")
     if limits.autonomy == "ask":
-        return Decision(Verdict.CONFIRM, "autonomy_ask", "You asked to approve every purchase.")
+        return Decision(Verdict.CONFIRM, "autonomy_ask",
+                        "Your autonomy setting is 'ask', so every purchase needs your approval.")
     if limits.autonomy == "auto_small":
         if a >= limits.auto_buy_under:
             return Decision(Verdict.CONFIRM, "above_auto_limit",
@@ -92,4 +93,6 @@ def decide(limits: Limits, ctx: Context, action: Action) -> Decision:
         if action.merchant_id not in limits.pre_approved_merchants:
             return Decision(Verdict.CONFIRM, "not_pre_approved", "This seller is not on your pre-approved list.")
         return Decision(Verdict.ALLOW, "pre_approved", "Pre-approved seller and within all your limits.")
-    return Decision(Verdict.CONFIRM, "unknown_autonomy", "Unknown autonomy setting, so approval is required.")
+    # Unknown autonomy value: fail safe, never auto-allow.
+    return Decision(Verdict.CONFIRM, "unknown_autonomy",
+                    "Your autonomy setting is not recognised, so you need to approve it.")
