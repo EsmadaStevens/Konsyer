@@ -45,6 +45,5 @@ def seed(conn, today):
             "Roma", 0, 0.4, source="flyer", alcohol=1, desc="Late night event from a flyer; organizer unverified.",
             slots=[(sat, 21, 0, sun, 2, 0, 100)])
     listing("Sample Nail Studio", "service", 30000, ["nails", "beauty", "salon"], -15.4150, 28.2900,
-            "Northmead", 0, 0.45, source="web_lead", desc="Gel nails. Contact details unverified.",
-            slots=[(sat, 10, 0, sat, 11, 30, 1), (sat, 12, 0, sat, 13, 30, 1)])
+            "Northmead", 0, 0.45, source="web_lead", desc="Gel nails. Contact details unverified.")
     conn.commit()

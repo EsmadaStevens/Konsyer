@@ -1,17 +1,18 @@
 """API entry point. Run from backend/:  uvicorn app.main:app --reload --port 8000
 Set KONSYER_STUB=1 to return a canned reply without calling the model."""
+import hmac
 import os
 import uuid
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import executor, flyers, wallet
-from .agent.cards import plan_card
+from . import executor, flyers, merchants, wallet
+from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
 from .llm import LLMError
@@ -64,6 +65,32 @@ class FlyerConfirmIn(BaseModel):
     availability_text: Optional[str] = None
 
 
+class MerchantIn(BaseModel):
+    user_id: int = 1
+    name: str
+    area: Optional[str] = None
+    whatsapp: Optional[str] = None
+
+
+class SlotIn(BaseModel):
+    date: str
+    start_time: str
+    end_time: Optional[str] = None
+    capacity: int = 1
+
+
+class MerchantListingIn(BaseModel):
+    user_id: int = 1
+    title: str
+    listing_type: str
+    description: Optional[str] = None
+    area: Optional[str] = None
+    price_ngwee: Optional[int] = None
+    serves_alcohol: bool = False
+    tags: list[str] = []
+    slots: list[SlotIn] = []
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -90,7 +117,8 @@ def chat(body: ChatIn, conn=Depends(db)):
     except (LLMError, httpx.HTTPError) as e:
         raise HTTPException(status_code=502, detail=f"model unavailable: {e}")
     card = plan_card(conn, r["plan_id"]) if r["plan_id"] else None
-    return {"stub": False, "reply": r["reply"], "cards": [card] if card else [],
+    cards = ([card] if card else []) + [contact_card(c) for c in r.get("contacts", [])]
+    return {"stub": False, "reply": r["reply"], "cards": cards,
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
 
 
@@ -177,3 +205,38 @@ def upload_flyer(image: UploadFile = File(...), user_id: int = Form(1), kind: st
 @app.post("/flyers/{flyer_id}/confirm")
 def confirm_flyer(flyer_id: int, body: FlyerConfirmIn, conn=Depends(db)):
     return _flyer_call(flyers.confirm, conn, body.user_id, flyer_id, body.model_dump(), lusaka_today())
+
+
+# ---------- merchants (signup is open; verification is admin-only) ----------
+def _merchant_call(fn, *args):
+    try:
+        return fn(*args)
+    except merchants.MerchantError as e:
+        raise HTTPException(status_code=merchants.STATUS.get(e.code, 400), detail=e.message)
+
+
+@app.post("/merchants")
+def register_merchant(body: MerchantIn, conn=Depends(db)):
+    return _merchant_call(merchants.register, conn, body.user_id, body.model_dump())
+
+
+@app.post("/merchants/{merchant_id}/listings")
+def add_merchant_listing(merchant_id: int, body: MerchantListingIn, conn=Depends(db)):
+    return _merchant_call(merchants.add_listing, conn, body.user_id, merchant_id, body.model_dump(),
+                          lusaka_today())
+
+
+@app.get("/merchants/{merchant_id}")
+def get_merchant(merchant_id: int, user_id: int = 1, conn=Depends(db)):
+    return _merchant_call(merchants.get_merchant, conn, user_id, merchant_id)
+
+
+@app.post("/admin/merchants/{merchant_id}/verify")
+def verify_merchant(merchant_id: int, x_admin_key: str = Header(default=""), conn=Depends(db)):
+    """Only a caller holding KONSYER_ADMIN_KEY (set in .env) can verify. If the key is unset, this is disabled."""
+    expected = os.environ.get("KONSYER_ADMIN_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=403, detail="Admin verification is disabled (no KONSYER_ADMIN_KEY set).")
+    if not hmac.compare_digest(x_admin_key.encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Wrong admin key.")
+    return _merchant_call(merchants.verify, conn, merchant_id)

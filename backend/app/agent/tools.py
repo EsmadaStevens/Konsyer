@@ -5,14 +5,24 @@ import json
 import re
 from datetime import timedelta
 
-from .. import policy, wallet
+from .. import contact, policy, wallet
+from .. import discovery as discovery_mod
 from ..money import fmt_k
 from ..providers.mock import MockRide
 from ..timeutil import fmt_local, local_date, parse_utc, to_local, to_utc_iso
 
 MAX_QTY = 50
+MAX_DISCOVERY_CALLS = 3   # each call may be a paid web search; the loop also dedupes identical calls
+MAX_DRAFTS = 5
 _STOP = {"the", "and", "for", "with", "near", "some", "something", "any", "what", "whats", "lusaka", "this", "that"}
 _LIVE = "('pending','approved','executed')"
+
+
+def _tier(r):
+    """Ranking tier, lower is shown first: verified merchants, then flyer/screenshot listings, then web leads."""
+    if r["status"] == "verified":
+        return 0
+    return 2 if r["source"] == "web_lead" else 1
 
 
 def _obj(props, required=()):
@@ -49,13 +59,23 @@ TOOLS = [
               "plan_title": _STR,
               "plan_budget_ngwee": {**_INT, "description": "The user's stated total budget for this plan"}},
             ["kind", "listing_id", "slot_id", "qty"])),
+    _fn("discover_services", "Search the web for businesses nobody has registered here (for example hair salons). Results are "
+        "UNVERIFIED leads: they cannot be booked or paid for here, and a price is shown only if the source states one.",
+        _obj({"service": {**_STR, "description": "e.g. 'hair salon' or 'barber'"},
+              "area": {**_STR, "description": "e.g. 'Kabulonga'. Defaults to Lusaka."}}, ["service"])),
+    _fn("draft_contact_message", "Draft a message to a seller and prepare WhatsApp/Messenger links. It only DRAFTS: the user taps send "
+        "in the app. Use lead_id from discover_services (valid only in this reply) OR listing_id of a listing with contact details.",
+        _obj({"details": {**_STR, "description": "What the user wants, e.g. 'gel nails Saturday afternoon, budget K300'. No links."},
+              "lead_id": _STR, "listing_id": _INT}, ["details"])),
 ]
 
 
 class Tools:
-    def __init__(self, conn, user_id, today, ride=None):
+    def __init__(self, conn, user_id, today, ride=None, discovery="default"):
         self.conn, self.user_id, self.today = conn, user_id, today
         self.ride = ride or MockRide()
+        self.discovery = discovery_mod.get_provider() if discovery == "default" else discovery
+        self.leads, self.contacts, self._searches = {}, [], 0
         self.plan_id = None
         self.proposed = []
         self.names = {t["function"]["name"] for t in TOOLS}
@@ -92,6 +112,7 @@ class Tools:
         d = {"listing_id": r["id"], "name": r["name"], "type": r["type"], "area": r["area"],
              "price_per_person_ngwee": r["price"], "price_display": fmt_k(r["price"]) if r["price"] is not None else None,
              "serves_alcohol": bool(r["serves_alcohol"]), "status": r["status"], "trust_score": r["trust_score"],
+             "verified": r["status"] == "verified", "source": r["source"],
              "is_sample": bool(r["is_sample"]), "has_whatsapp": bool(r["contact_whatsapp"]),
              "slots": [{k: v for k, v in s.items() if not k.startswith("_")} for s in slots]}
         if full:
@@ -134,6 +155,8 @@ class Tools:
         tagset = [t.lower() for t in (tags or []) if isinstance(t, str)]
         found = []
         for r in self.conn.execute("SELECT * FROM listings").fetchall():
+            if r["status"] == "claimed":
+                continue  # submitted by a business but not yet verified: hidden from the agent
             if type and r["type"] != type:
                 continue
             if max_price_ngwee is not None and r["price"] is not None and r["price"] > int(max_price_ngwee):
@@ -146,13 +169,15 @@ class Tools:
             if (words or tagset) and score == 0:
                 continue
             found.append((score, r))
-        found.sort(key=lambda x: -x[0])
+        found.sort(key=lambda x: (_tier(x[1]), -x[0], -x[1]["trust_score"], x[1]["id"]))
         out = [self._listing_dict(r) for _, r in found[:8]]
         return {"count": len(out), "listings": out}
 
     def get_listing(self, listing_id, **_):
         r = self.conn.execute("SELECT * FROM listings WHERE id=?", (int(listing_id),)).fetchone()
-        return self._listing_dict(r, full=True) if r else {"error": "listing not found"}
+        if not r or r["status"] == "claimed":
+            return {"error": "listing not found"}
+        return self._listing_dict(r, full=True)
 
     def check_trust(self, listing_id, **_):
         r = self.conn.execute("SELECT l.*, m.verified AS mv FROM listings l LEFT JOIN merchants m ON m.id=l.merchant_id WHERE l.id=?",
@@ -207,6 +232,10 @@ class Tools:
         s = self.conn.execute("SELECT * FROM slots WHERE id=?", (int(slot_id),)).fetchone()
         if not l:
             return {"error": "listing not found"}
+        if l["status"] == "claimed":
+            return {"error": "this listing is awaiting verification and cannot be booked"}
+        if l["source"] == "web_lead":
+            return {"error": "this is an unverified web lead and cannot be booked; the user can contact the seller"}
         if not s or s["listing_id"] != l["id"]:
             return {"error": "that slot does not belong to that listing"}
         if s["capacity"] - s["booked"] < qty:
@@ -269,3 +298,61 @@ class Tools:
         self._store(aid, d)
         return {"action_id": aid, "pickup": fmt_local(pickup), "price_display": fmt_k(q.price),
                 "provider": q.provider, "decision": d.verdict.value}
+
+    # ---------- discovery and contact (read-only: nothing is booked, paid or sent) ----------
+    def discover_services(self, service, area=None, **_):
+        service, area = contact.one_line(service, 60), contact.one_line(area, 60) or "Lusaka"
+        if not service:
+            return {"error": "service is required"}
+        if self.discovery is None:
+            return {"error": "web discovery is not available"}
+        if self._searches >= MAX_DISCOVERY_CALLS:
+            return {"error": "search limit reached for this reply; use the results you already have"}
+        self._searches += 1
+        try:
+            leads = discovery_mod.clean_leads(self.discovery.search(service, area))
+        except Exception:  # a provider must never break the chat
+            return {"error": "web discovery is unavailable right now"}
+        sample = bool(getattr(self.discovery, "is_sample", False))
+        out = []
+        for lead in leads:
+            lead_id = f"L{len(self.leads) + 1}"
+            self.leads[lead_id] = {**lead, "is_sample": sample}
+            out.append({"lead_id": lead_id, "name": lead["name"], "area": lead["area"], "platform": lead["platform"],
+                        "source_host": lead["source_host"], "has_whatsapp_number": lead["phone_kind"] == "mobile",
+                        "price_text": lead["price_text"] or "not listed: ask the seller",
+                        "verified": False, "source": "web_lead", "is_sample": sample})
+        return {"count": len(out), "leads": out,
+                "note": "Unverified web results. They cannot be booked or paid for here and cannot be counted in a budget "
+                        "unless price_text states a price. To help the user reach one, call draft_contact_message."}
+
+    def draft_contact_message(self, details, lead_id=None, listing_id=None, **_):
+        if (lead_id is None) == (listing_id is None):
+            return {"error": "give exactly one of lead_id or listing_id"}
+        if len(self.contacts) >= MAX_DRAFTS:
+            return {"error": "draft limit reached for this reply"}
+        if lead_id is not None:
+            lead = self.leads.get(str(lead_id).strip().upper())
+            if lead is None:
+                return {"error": "unknown lead_id; lead ids only last for the current reply, so search again"}
+            name, phone, url = lead["name"], lead["phone"], lead["source_url"]
+            verified, sample, price_text = False, lead["is_sample"], lead["price_text"]
+        else:
+            r = self.conn.execute("SELECT * FROM listings WHERE id=?", (int(listing_id),)).fetchone()
+            if not r or r["status"] == "claimed":
+                return {"error": "listing not found"}
+            name, phone, url = r["name"], contact.parse_zm_phone(r["contact_whatsapp"]), None
+            verified, sample, price_text = r["status"] == "verified", bool(r["is_sample"]), None
+        message = contact.build_message(name, details)
+        chans = contact.channels(phone, url, message)
+        if not chans:
+            return {"error": "no contact details for this seller; tell the user to ask them directly"}
+        self.contacts.append({"name": name, "message": message, "channels": chans, "phone": phone,
+                              "source_url": url, "price_text": price_text, "verified": verified, "sample_data": sample})
+        self.conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                          (self.user_id, "contact_drafted",
+                           f"Drafted a message to '{name}'. Nothing was sent: the user taps send in their own app.",
+                           "draft_only"))
+        self.conn.commit()
+        return {"drafted": True, "channels": [c["kind"] for c in chans],
+                "note": "Nothing has been sent. The user taps send in the app and should check the number or page first."}

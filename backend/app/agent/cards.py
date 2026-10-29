@@ -24,3 +24,10 @@ def plan_card(conn, plan_id):
         del i["time_utc"]
     return {"type": "plan", "title": plan["title"] or "Your plan", "sample_data": sample,
             "budget": plan["budget"] if plan["budget"] is not None else total, "items": items, "total": total}
+
+
+def contact_card(c):
+    """Draft message plus links the user taps. Nothing has been sent."""
+    return {"type": "contact", "name": c["name"], "message": c["message"], "channels": c["channels"],
+            "phone": c.get("phone"), "price_text": c.get("price_text"), "source_url": c.get("source_url"),
+            "verified": bool(c.get("verified")), "sample_data": bool(c.get("sample_data"))}

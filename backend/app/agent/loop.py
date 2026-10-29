@@ -51,4 +51,5 @@ def run_agent(conn, user_id, message, history=None, today=None, llm_chat=None, m
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(result)})
     if not reply:
         reply = "I've lined up the options below for your approval." if tools.proposed else FALLBACK
-    return {"reply": reply, "plan_id": tools.plan_id, "proposed": tools.proposed, "trace": trace, "steps": steps}
+    return {"reply": reply, "plan_id": tools.plan_id, "proposed": tools.proposed, "contacts": tools.contacts,
+            "trace": trace, "steps": steps}
