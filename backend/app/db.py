@@ -68,6 +68,13 @@ CREATE TABLE IF NOT EXISTS reminders(
 CREATE TABLE IF NOT EXISTS flyers(
   id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id), source TEXT, extracted TEXT,
   confidence REAL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS web_leads(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, search_key TEXT NOT NULL, name TEXT NOT NULL, area TEXT, phone TEXT,
+  price_text TEXT, price_for TEXT, source_url TEXT NOT NULL, platform TEXT,
+  corroborated INTEGER NOT NULL DEFAULT 0, is_sample INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_web_leads_key ON web_leads(search_key);
+CREATE TABLE IF NOT EXISTS recent_leads(
+  user_id INTEGER PRIMARY KEY, lead_ids TEXT NOT NULL, shown_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback(
   id INTEGER PRIMARY KEY, booking_id INTEGER REFERENCES bookings(id), rating INTEGER, note TEXT);
 """

@@ -1,11 +1,15 @@
 """Discovery probe using Meta Model API search grounding (a Meta feature, so allowed).
 
 Run from the backend folder with the venv active:
-    python -m scripts.probe_search
+    python -m scripts.probe_search                      (all 8 queries: slow and uses many tokens)
+    python -m scripts.probe_search --only 1,4 --debug   (queries 1 and 4, plus the response structure)
+    python -m scripts.probe_search --only 1 --max-tool-calls 4
+    python -m scripts.probe_search --only 1 --effort low
 
 Needs META_API_KEY (or MODEL_API_KEY) in the environment or in the project-root .env.
 Prints to the screen only; nothing is written to disk. Uses 8 search calls (a few cents at most).
 """
+import argparse
 import json
 import os
 import re
@@ -33,7 +37,8 @@ PROMPT = (
     "Return ONLY a JSON array (at most 6 items, no other text). Each item has these keys: "
     "name, area, phone (exactly as shown on the source, or null), whatsapp_mentioned (true or false), "
     "price_text (the exact price wording from the source, or null; never estimate), "
-    "source_url (the page where you saw it), platform (website, facebook, instagram, directory or other). "
+    "source_url (the page where you saw it), platform (website, facebook, instagram, directory or other), "
+    "image_url (a direct link to an image of a price list, menu or flyer that is shown on that page, or null). "
     "Use null for anything the source does not show. Do not invent businesses, numbers or prices."
 )
 
@@ -85,6 +90,32 @@ def collect(resp):
     return "\n".join(text), urls, calls
 
 
+def urls_in(obj, found=None):
+    """Every http(s) string anywhere inside a JSON value (to see whether search calls list their sources)."""
+    found = set() if found is None else found
+    if isinstance(obj, str):
+        if obj.startswith(("http://", "https://")):
+            found.add(obj)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            urls_in(v, found)
+    elif isinstance(obj, list):
+        for v in obj:
+            urls_in(v, found)
+    return found
+
+
+def shrink(obj, n=110):
+    """Copy of a JSON value with long strings cut, so the structure is readable."""
+    if isinstance(obj, str):
+        return obj if len(obj) <= n else obj[:n] + "..."
+    if isinstance(obj, dict):
+        return {k: shrink(v, n) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [shrink(v, n) for v in obj[:6]] + (["..."] if len(obj) > 6 else [])
+    return obj
+
+
 def parse_leads(text):
     a, b = text.find("["), text.rfind("]")
     if a < 0 or b <= a:
@@ -103,25 +134,42 @@ def host(u):
         return ""
 
 
+def request_body(service, area, args):
+    body = {"model": MODEL, "input": PROMPT.format(service=service, area=area), "tools": [{"type": "web_search"}]}
+    if args.max_tool_calls:
+        body["max_tool_calls"] = args.max_tool_calls      # unverified for Meta: a 400 reply tells us
+    if args.effort:
+        body["reasoning"] = {"effort": args.effort}       # unverified for Meta: a 400 reply tells us
+    return body
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", default="", help="comma list of query numbers, e.g. 1,4")
+    ap.add_argument("--debug", action="store_true", help="print the response structure of the first query")
+    ap.add_argument("--max-tool-calls", type=int, default=0)
+    ap.add_argument("--effort", default="", help="reasoning effort to try, e.g. low")
+    args = ap.parse_args()
+    picked = {int(x) for x in args.only.split(",") if x.strip().isdigit()}
+    queries = [q for i, q in enumerate(QUERIES, 1) if not picked or i in picked]
     key = load_key()
     if not key:
         print("No META_API_KEY found. Add it to the root .env (never paste it in chat).")
         return
-    tot = dict(leads=0, area=0, phone=0, mobile=0, price=0, cited=0, fb=0, parse_fail=0)
-    for service, area in QUERIES:
+    tot = dict(leads=0, area=0, phone=0, mobile=0, price=0, cited=0, fb=0, images=0, parse_fail=0)
+    first = True
+    for service, area in queries:
         print(f"\n=== {service} | {area}")
         t0 = time.time()
         try:
             r = requests.post(
                 URL, timeout=180,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": MODEL, "input": PROMPT.format(service=service, area=area),
-                      "tools": [{"type": "web_search"}]})
+                json=request_body(service, area, args))
         except requests.RequestException as e:
             print("  request failed:", e)
             continue
@@ -131,8 +179,16 @@ def main():
             continue
         body = r.json()
         text, cited, calls = collect(body)
+        in_calls = urls_in([i for i in body.get("output", []) if i.get("type") == "web_search_call"])
+        cited = cited | in_calls
         leads = parse_leads(text)
-        print(f"  search calls: {calls} | cited urls: {len(cited)} | usage: {body.get('usage')}")
+        usage = body.get("usage") or {}
+        print(f"  search calls: {calls} | urls in annotations or search calls: {len(cited)} | "
+              f"tokens in/out: {usage.get('input_tokens')}/{usage.get('output_tokens')}")
+        if args.debug and first:
+            for item in body.get("output", [])[:3]:
+                print("  STRUCTURE:", json.dumps(shrink(item), ensure_ascii=False)[:900])
+        first = False
         if leads is None:
             tot["parse_fail"] += 1
             print("  could not parse a JSON array. First 300 chars of text:\n  ", text[:300].replace("\n", " "))
@@ -150,8 +206,13 @@ def main():
             tot["price"] += bool(x.get("price_text"))
             tot["cited"] += is_cited
             tot["fb"] += is_fb
-            print(f"  - {str(x.get('name'))[:34]:34} | area:{'Y' if in_area else 'n'} | {kind:8} | "
-                  f"price:{'Y' if x.get('price_text') else 'n'} | cited:{'Y' if is_cited else 'n'} | {host(src)}")
+            tot["images"] += bool(x.get("image_url"))
+            print(f"  - {str(x.get('name'))[:40]:40} | area:{'Y' if in_area else 'n'} | {kind:8} | "
+                  f"price:{'Y' if x.get('price_text') else 'n'} | cited:{'Y' if is_cited else 'n'}")
+            print(f"      phone: {x.get('phone')}  | price_text: {x.get('price_text')}")
+            print(f"      url:   {src}")
+            if x.get("image_url"):
+                print(f"      image: {x.get('image_url')}")
     print("\n=== SUMMARY (counts only)")
     for k, v in tot.items():
         print(f"  {k:12} {v}")

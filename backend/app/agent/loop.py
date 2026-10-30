@@ -2,7 +2,7 @@
 import json
 import os
 
-from .. import llm
+from .. import discovery, llm
 from ..timeutil import lusaka_today
 from .prompts import system_prompt
 from .tools import TOOLS, Tools
@@ -22,8 +22,10 @@ def run_agent(conn, user_id, message, history=None, today=None, llm_chat=None, m
     llm_chat = llm_chat or llm.chat
     today = today or lusaka_today()
     tools = Tools(conn, user_id, today)
-    messages = [{"role": "system", "content": system_prompt(today)}, *_clean_history(history),
-                {"role": "user", "content": message[:2000]}]
+    note = discovery.recent_note(conn, user_id)
+    messages = [{"role": "system", "content": system_prompt(today)},
+                *([{"role": "system", "content": note}] if note else []),
+                *_clean_history(history), {"role": "user", "content": message[:2000]}]
     effort = os.environ.get("AGENT_REASONING_EFFORT", "low") or None
     kw = {"reasoning_effort": effort} if effort else {}
     seen, trace, reply, steps = {}, [], "", 0

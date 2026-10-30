@@ -2,6 +2,7 @@
 it records a pending action and asks the policy engine (plain code) for ALLOW / CONFIRM / DENY.
 Amounts always come from the database, never from numbers the model supplies."""
 import json
+import os
 import re
 from datetime import timedelta
 
@@ -16,6 +17,11 @@ MAX_DISCOVERY_CALLS = 3   # each call may be a paid web search; the loop also de
 MAX_DRAFTS = 5
 _STOP = {"the", "and", "for", "with", "near", "some", "something", "any", "what", "whats", "lusaka", "this", "that"}
 _LIVE = "('pending','approved','executed')"
+
+
+def _show_phones():
+    """DISCOVERY_SHOW_PHONES=0 hides web-lead phone numbers (and the WhatsApp/call buttons) if they prove unreliable."""
+    return os.environ.get("DISCOVERY_SHOW_PHONES", "1") != "0"
 
 
 def _tier(r):
@@ -75,7 +81,7 @@ class Tools:
         self.conn, self.user_id, self.today = conn, user_id, today
         self.ride = ride or MockRide()
         self.discovery = discovery_mod.get_provider() if discovery == "default" else discovery
-        self.leads, self.contacts, self._searches = {}, [], 0
+        self.contacts, self._searches = [], 0
         self.plan_id = None
         self.proposed = []
         self.names = {t["function"]["name"] for t in TOOLS}
@@ -310,21 +316,23 @@ class Tools:
             return {"error": "search limit reached for this reply; use the results you already have"}
         self._searches += 1
         try:
-            leads = discovery_mod.clean_leads(self.discovery.search(service, area))
+            rows, _cached = discovery_mod.find_or_search(self.conn, self.discovery, service, area)
         except Exception:  # a provider must never break the chat
             return {"error": "web discovery is unavailable right now"}
-        sample = bool(getattr(self.discovery, "is_sample", False))
+        discovery_mod.remember(self.conn, self.user_id, rows)
         out = []
-        for lead in leads:
-            lead_id = f"L{len(self.leads) + 1}"
-            self.leads[lead_id] = {**lead, "is_sample": sample}
-            out.append({"lead_id": lead_id, "name": lead["name"], "area": lead["area"], "platform": lead["platform"],
-                        "source_host": lead["source_host"], "has_whatsapp_number": lead["phone_kind"] == "mobile",
-                        "price_text": lead["price_text"] or "not listed: ask the seller",
-                        "verified": False, "source": "web_lead", "is_sample": sample})
+        for r in rows:
+            phone = r["phone"] if _show_phones() else None
+            out.append({"lead_id": f"L{r['id']}", "name": r["name"], "area": r["area"], "platform": r["platform"],
+                        "source_host": contact.host_of(r["source_url"]),
+                        "has_whatsapp_number": contact.phone_kind(phone) == "mobile",
+                        "price_text": r["price_text"] or "not listed: ask the seller", "price_for": r["price_for"],
+                        "number_on_several_sites": bool(r["corroborated"]),
+                        "verified": False, "source": "web_lead", "is_sample": bool(r["is_sample"])})
         return {"count": len(out), "leads": out,
-                "note": "Unverified web results. They cannot be booked or paid for here and cannot be counted in a budget "
-                        "unless price_text states a price. To help the user reach one, call draft_contact_message."}
+                "note": "Unverified web results from directories and social pages, which can be out of date. They cannot be "
+                        "booked or paid for here. price_text is only what a page said, and may cover one specific service: "
+                        "treat it as a hint and tell the user to confirm. To help the user reach one, call draft_contact_message."}
 
     def draft_contact_message(self, details, lead_id=None, listing_id=None, **_):
         if (lead_id is None) == (listing_id is None):
@@ -332,23 +340,27 @@ class Tools:
         if len(self.contacts) >= MAX_DRAFTS:
             return {"error": "draft limit reached for this reply"}
         if lead_id is not None:
-            lead = self.leads.get(str(lead_id).strip().upper())
+            m = re.fullmatch(r"L(\d{1,9})", str(lead_id).strip().upper())
+            lead = discovery_mod.get_lead(self.conn, int(m.group(1))) if m else None
             if lead is None:
-                return {"error": "unknown lead_id; lead ids only last for the current reply, so search again"}
-            name, phone, url = lead["name"], lead["phone"], lead["source_url"]
-            verified, sample, price_text = False, lead["is_sample"], lead["price_text"]
+                return {"error": "unknown or expired lead_id (leads last 24 hours); search again"}
+            name, phone, url = lead["name"], (lead["phone"] if _show_phones() else None), lead["source_url"]
+            verified, sample, price_text = False, bool(lead["is_sample"]), lead["price_text"]
+            price_for, corroborated = lead["price_for"], bool(lead["corroborated"])
         else:
             r = self.conn.execute("SELECT * FROM listings WHERE id=?", (int(listing_id),)).fetchone()
             if not r or r["status"] == "claimed":
                 return {"error": "listing not found"}
             name, phone, url = r["name"], contact.parse_zm_phone(r["contact_whatsapp"]), None
             verified, sample, price_text = r["status"] == "verified", bool(r["is_sample"]), None
+            price_for, corroborated = None, False
         message = contact.build_message(name, details)
         chans = contact.channels(phone, url, message)
         if not chans:
             return {"error": "no contact details for this seller; tell the user to ask them directly"}
         self.contacts.append({"name": name, "message": message, "channels": chans, "phone": phone,
-                              "source_url": url, "price_text": price_text, "verified": verified, "sample_data": sample})
+                              "source_url": url, "price_text": price_text, "price_for": price_for,
+                              "corroborated": corroborated, "verified": verified, "sample_data": sample})
         self.conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
                           (self.user_id, "contact_drafted",
                            f"Drafted a message to '{name}'. Nothing was sent: the user taps send in their own app.",
