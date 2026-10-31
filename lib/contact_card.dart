@@ -5,9 +5,16 @@ import 'package:url_launcher/url_launcher.dart';
 /// A drafted message to a seller. The app never sends anything: the user taps a link
 /// (WhatsApp, Messenger, Instagram, call, source page) or copies the text and sends it themselves.
 /// Only https and tel links are opened.
-class ContactCard extends StatelessWidget {
+class ContactCard extends StatefulWidget {
   final Map<String, dynamic> c;
   const ContactCard(this.c, {super.key});
+  @override
+  State<ContactCard> createState() => _ContactCardState();
+}
+
+class _ContactCardState extends State<ContactCard> {
+  bool _invite = false;
+  Map<String, dynamic> get c => widget.c;
 
   static IconData _icon(String kind) {
     switch (kind) {
@@ -24,27 +31,27 @@ class ContactCard extends StatelessWidget {
     }
   }
 
-  void _toast(BuildContext context, String msg) {
+  void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  Future<void> _open(BuildContext context, String url) async {
+  Future<void> _open(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'tel')) {
-      _toast(context, 'That link is not allowed.');
+      _toast('That link is not allowed.');
       return;
     }
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && context.mounted) _toast(context, 'Could not open the link.');
+      if (!ok && context.mounted) _toast('Could not open the link.');
     } catch (_) {
-      if (context.mounted) _toast(context, 'Could not open the link.');
+      if (context.mounted) _toast('Could not open the link.');
     }
   }
 
-  Future<void> _copy(BuildContext context, String text) async {
+  Future<void> _copy(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
-    if (context.mounted) _toast(context, 'Message copied');
+    if (context.mounted) _toast('Message copied');
   }
 
   @override
@@ -56,15 +63,17 @@ class ContactCard extends StatelessWidget {
     final priceFor = (c['price_for'] ?? '').toString();
     final phone = (c['phone'] ?? '').toString();
     final source = (c['source_url'] ?? '').toString();
-    final message = (c['message'] ?? '').toString();
-    final channels = (c['channels'] as List? ?? []).cast<Map<String, dynamic>>();
+    final hasInvite = (c['invite_message'] ?? '').toString().isNotEmpty;
+    final inviting = _invite && hasInvite;
+    final message = (inviting ? c['invite_message'] : c['message'] ?? '').toString();
+    final channels = ((inviting ? c['invite_channels'] : c['channels']) as List? ?? []).cast<Map<String, dynamic>>();
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Contact ${c['name']}', style: t.titleMedium),
+          Text(inviting ? 'Invite ${c['name']} to Konsyer' : 'Contact ${c['name']}', style: t.titleMedium),
           const SizedBox(height: 2),
           Text(
             verified
@@ -97,19 +106,31 @@ class ContactCard extends StatelessWidget {
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             OutlinedButton.icon(
-              onPressed: () => _copy(context, message),
+              onPressed: () => _copy(message),
               icon: const Icon(Icons.copy_outlined),
               label: const Text('Copy message'),
             ),
             for (final ch in channels)
               FilledButton.tonalIcon(
-                onPressed: () => _open(context, (ch['url'] ?? '').toString()),
+                onPressed: () => _open((ch['url'] ?? '').toString()),
                 icon: Icon(_icon((ch['kind'] ?? '').toString())),
                 label: Text((ch['label'] ?? 'Open').toString()),
               ),
           ]),
-          const SizedBox(height: 8),
+          if (hasInvite)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextButton.icon(
+                onPressed: () => setState(() => _invite = !_invite),
+                icon: Icon(inviting ? Icons.arrow_back : Icons.storefront_outlined),
+                label: Text(inviting ? 'Back to my message' : 'Invite this business to Konsyer'),
+              ),
+            ),
+          const SizedBox(height: 4),
           Text('Nothing has been sent. You tap send yourself.', style: t.labelSmall),
+          if (!verified)
+            Text('Konsyer does not handle payment for sellers outside the app. You and the seller arrange it directly.',
+                style: t.labelSmall),
         ]),
       ),
     );

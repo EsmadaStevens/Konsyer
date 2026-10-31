@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'api.dart';
+import '../api.dart';
 
 class FlyerScreen extends StatefulWidget {
   const FlyerScreen({super.key});

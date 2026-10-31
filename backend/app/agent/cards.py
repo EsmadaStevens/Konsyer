@@ -1,5 +1,6 @@
 import json
 
+from .. import contact
 from ..timeutil import to_local
 
 
@@ -27,8 +28,14 @@ def plan_card(conn, plan_id):
 
 
 def contact_card(c):
-    """Draft message plus links the user taps. Nothing has been sent."""
-    return {"type": "contact", "name": c["name"], "message": c["message"], "channels": c["channels"],
+    """Draft message plus links the user taps. Nothing has been sent. Outside (unverified) businesses also get an
+    'invite to Konsyer' message, built by code from a template."""
+    card = {"type": "contact", "name": c["name"], "message": c["message"], "channels": c["channels"],
             "phone": c.get("phone"), "price_text": c.get("price_text"), "price_for": c.get("price_for"),
             "corroborated": bool(c.get("corroborated")), "source_url": c.get("source_url"),
             "verified": bool(c.get("verified")), "sample_data": bool(c.get("sample_data"))}
+    if not card["verified"]:
+        invite = contact.build_invite(c["name"])
+        card["invite_message"] = invite
+        card["invite_channels"] = contact.channels(c.get("phone"), c.get("source_url"), invite)
+    return card

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'api.dart';
+import '../api.dart';
 
 /// DEMO admin console, for the video. The admin key is typed here each time and is never saved.
 /// A production version would live behind real admin sign-in, not in the customer app.
@@ -52,6 +52,18 @@ class _AdminScreenState extends State<AdminScreen> {
       await _load();
     } catch (e) {
       _toast('$e');
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _advance() async {
+    setState(() => _busy = true);
+    try {
+      final j = await apiPost('/admin/advance-time', {'hours': 24}, headers: _headers);
+      _toast('Clock moved forward 24 hours. App time is now ${j['demo_now']}.');
+    } catch (e) {
+      _toast('$e');
+    } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -134,6 +146,17 @@ class _AdminScreenState extends State<AdminScreen> {
         FilledButton(onPressed: _busy ? null : _load, child: Text(_busy ? 'Working...' : 'Load businesses')),
         if (_error != null)
           Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: TextStyle(color: cs.error))),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _advance,
+          icon: const Icon(Icons.fast_forward_outlined),
+          label: const Text('Demo clock: fast-forward 24 hours'),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('Video only: shows held money being released 24 hours after a service.',
+              style: Theme.of(context).textTheme.labelSmall),
+        ),
         const SizedBox(height: 8),
         for (final m in _rows) _card(m),
       ]),

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'admin_screen.dart';
-import 'api.dart';
-import 'contact_card.dart';
-import 'flyer_screen.dart';
-import 'merchant_screen.dart';
+import '/screens/admin_screen.dart';
+import '/api.dart';
+import '/contact_card.dart';
+import '/screens/flyer_screen.dart';
+import '/screens/merchant_screen.dart';
+import '/screens/vouchers_screen.dart';
 
 void main() => runApp(const ConciergeApp());
 
@@ -237,7 +238,8 @@ class _PlanCardState extends State<PlanCard> {
         ),
       ]);
     } else if (status == 'executed') {
-      footer = Text('Done (sandbox wallet)', style: small?.copyWith(color: Colors.greenAccent));
+      footer = Text('Booked. Money is held until you check in (sandbox wallet).',
+          style: small?.copyWith(color: Colors.greenAccent));
     } else if (status == 'denied') {
       footer = Text(decision == 'DENY' ? 'Blocked by your limits. Nothing charged.' : 'Declined. Nothing charged.',
           style: small?.copyWith(color: cs.error));
@@ -354,6 +356,17 @@ class _WalletScreenState extends State<WalletScreen> {
                     const SizedBox(height: 8),
                     Text(fmtK((j['balance'] as num).toInt()), style: t.displaySmall),
                     Text('Spent today: ${fmtK((j['spent_today'] as num).toInt())}'),
+                    Text('Held for sellers: ${fmtK(((j['held'] as num?) ?? 0).toInt())}'),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await Navigator.of(context)
+                            .push(MaterialPageRoute(builder: (_) => const VouchersScreen()));
+                        _load();
+                      },
+                      icon: const Icon(Icons.lock_outline),
+                      label: const Text('Held payments'),
+                    ),
                     const SizedBox(height: 12),
                     Text('Your limits', style: t.titleSmall),
                     Text('Per purchase: ${fmtK((j['per_purchase_cap'] as num).toInt())}'),

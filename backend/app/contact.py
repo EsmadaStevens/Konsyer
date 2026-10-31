@@ -74,6 +74,14 @@ def build_message(name, details):
             f"I'm looking for: {what}. Could you share your price and availability? Thank you.")
 
 
+def build_invite(name):
+    """Message inviting an outside business to register on Konsyer. Built by code from a template (no model text)."""
+    return (f"Hello {one_line(name, 60)}, I found you through Konsyer, a Lusaka booking assistant (an early demo: no real "
+            "payments yet). Konsyer lets businesses register, add real times and prices, and get verified. Customers "
+            "can then book with a deposit that is held until the service is delivered. Would you be interested in being "
+            "listed? Thank you.")
+
+
 def whatsapp_link(digits, text):
     return f"https://wa.me/{digits}?text={quote(text)}"
 

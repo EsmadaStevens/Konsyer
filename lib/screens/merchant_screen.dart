@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'api.dart';
+import '../api.dart';
 
 String? _orNull(String s) => s.trim().isEmpty ? null : s.trim();
 
@@ -13,6 +13,7 @@ class MerchantScreen extends StatefulWidget {
 
 class _MerchantScreenState extends State<MerchantScreen> {
   Map<String, dynamic>? merchant;
+  List<Map<String, dynamic>> bookings = [];
   bool loading = true;
   bool busy = false;
   String? error;
@@ -35,9 +36,17 @@ class _MerchantScreenState extends State<MerchantScreen> {
     try {
       final j = await apiGet('/merchants?user_id=$userId');
       final list = (j['merchants'] as List).cast<Map<String, dynamic>>();
+      var found = <Map<String, dynamic>>[];
+      if (list.isNotEmpty) {
+        try {
+          final b = await apiGet('/merchants/${list.first['merchant_id']}/vouchers?user_id=$userId');
+          found = (b['vouchers'] as List).cast<Map<String, dynamic>>();
+        } catch (_) {}
+      }
       if (mounted) {
         setState(() {
           merchant = list.isEmpty ? null : list.first;
+          bookings = found;
           error = null;
           loading = false;
         });
@@ -76,6 +85,58 @@ class _MerchantScreenState extends State<MerchantScreen> {
     final added = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => ListingFormScreen(merchant: merchant!)));
     if (added == true) _load();
+  }
+
+  Future<void> _bookingAction(Map<String, dynamic> v, String verb, String done) async {
+    setState(() => busy = true);
+    try {
+      await apiPost('/vouchers/${v['id']}/$verb', {'user_id': userId});
+      _toast(done);
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Widget _booking(Map<String, dynamic> v) {
+    final t = Theme.of(context).textTheme;
+    final held = v['state'] == 'held';
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text((v['label'] ?? '').toString(), style: t.titleSmall)),
+            Text(v['amount_display'].toString()),
+          ]),
+          Text('${held ? 'Held' : v['state']}${(v['starts'] ?? '').toString().isEmpty ? '' : '  -  ${v['starts']}'}',
+              style: t.bodySmall),
+          if (held)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                FilledButton(
+                  onPressed: (busy || v['can_confirm'] != true)
+                      ? null
+                      : () => _bookingAction(v, 'merchant-confirm', 'Confirmed. Payment released (simulated).'),
+                  child: const Text('Customer arrived'),
+                ),
+                OutlinedButton(
+                  onPressed: busy
+                      ? null
+                      : () => _bookingAction(v, 'merchant-cancel', 'Cancelled. The customer was refunded in full.'),
+                  child: const Text('Cancel booking'),
+                ),
+              ]),
+            ),
+          if (held && v['can_confirm'] != true)
+            Text('You can confirm once the booking time has started.', style: t.labelSmall),
+        ]),
+      ),
+    );
   }
 
   Widget _signupForm() {
@@ -157,6 +218,11 @@ class _MerchantScreenState extends State<MerchantScreen> {
             subtitle: Text('${l['type']} - ${fmtK((l['price'] as num).toInt())}'),
             trailing: _statusChip(l['status'].toString()),
           ),
+        const SizedBox(height: 16),
+        Text('Customer bookings (payment held by Konsyer)', style: t.titleSmall),
+        const Divider(),
+        if (bookings.isEmpty) const Text('No bookings yet.'),
+        for (final v in bookings) _booking(v),
         const SizedBox(height: 8),
         Text('Pull down to refresh the status.', style: t.labelSmall),
       ]),
