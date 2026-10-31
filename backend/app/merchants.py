@@ -7,6 +7,7 @@ import json
 import re
 from datetime import date, datetime, timedelta
 
+from .contact import is_http_url
 from .flyers import MAX_PRICE, TYPES, normalize_phone
 from .timeutil import LUSAKA, to_utc_iso
 
@@ -38,9 +39,12 @@ def register(conn, user_id, f):
         phone = normalize_phone(f.get("whatsapp"))
     except ValueError:
         raise MerchantError("invalid", "That WhatsApp number does not look right.")
+    social = _clean(f.get("social_url"), 300)
+    if social and not is_http_url(social):
+        raise MerchantError("invalid", "The page link must start with https:// (for example your Facebook page).")
     mid = conn.execute(
-        "INSERT INTO merchants(name, owner_user_id, whatsapp, area, verified, is_sample) VALUES (?,?,?,?,0,0)",
-        (name, user_id, phone, _clean(f.get("area"), 80))).lastrowid
+        "INSERT INTO merchants(name, owner_user_id, whatsapp, area, social_url, verified, is_sample) "
+        "VALUES (?,?,?,?,?,0,0)", (name, user_id, phone, _clean(f.get("area"), 80), social)).lastrowid
     conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
                  (user_id, "merchant_registered",
                   f"'{name}' registered. It is not verified yet, so its listings are hidden from the agent.",
@@ -125,8 +129,27 @@ def get_merchant(conn, user_id, merchant_id):
         raise MerchantError("not_found", "Merchant not found.")
     rows = conn.execute("SELECT id, name, type, price, status FROM listings WHERE merchant_id=? ORDER BY id",
                         (merchant_id,)).fetchall()
-    return {"merchant_id": m["id"], "name": m["name"], "verified": bool(m["verified"]),
-            "listings": [dict(r) for r in rows]}
+    return {"merchant_id": m["id"], "name": m["name"], "area": m["area"], "whatsapp": m["whatsapp"],
+            "social_url": m["social_url"], "verified": bool(m["verified"]), "listings": [dict(r) for r in rows]}
+
+
+def list_for_owner(conn, user_id):
+    """The signed-in user's own businesses (not sample data), so the screen survives a restart."""
+    ids = conn.execute("SELECT id FROM merchants WHERE owner_user_id=? AND is_sample=0 ORDER BY id", (user_id,))
+    return [get_merchant(conn, user_id, r["id"]) for r in ids.fetchall()]
+
+
+def admin_list(conn):
+    """Every real merchant, those needing review first. Caller (the endpoint) must have checked the admin key."""
+    out = []
+    for m in conn.execute("SELECT * FROM merchants WHERE is_sample=0 ORDER BY id DESC").fetchall():
+        counts = {r["status"]: r["n"] for r in conn.execute(
+            "SELECT status, COUNT(*) AS n FROM listings WHERE merchant_id=? GROUP BY status", (m["id"],))}
+        out.append({"merchant_id": m["id"], "name": m["name"], "area": m["area"], "whatsapp": m["whatsapp"],
+                    "social_url": m["social_url"], "verified": bool(m["verified"]),
+                    "claimed_listings": counts.get("claimed", 0), "verified_listings": counts.get("verified", 0),
+                    "needs_review": (not m["verified"]) or counts.get("claimed", 0) > 0})
+    return sorted(out, key=lambda x: not x["needs_review"])
 
 
 def verify(conn, merchant_id):

@@ -37,15 +37,18 @@ Map<String, dynamic> decodeResponse(http.Response r) {
   return j as Map<String, dynamic>;
 }
 
-Future<Map<String, dynamic>> apiGet(String path) async {
-  final r = await http.get(Uri.parse('$apiBase$path')).timeout(const Duration(seconds: 30));
+Future<Map<String, dynamic>> apiGet(String path, {Map<String, String>? headers}) async {
+  final r = await http
+      .get(Uri.parse('$apiBase$path'), headers: headers)
+      .timeout(const Duration(seconds: 30));
   return decodeResponse(r);
 }
 
-Future<Map<String, dynamic>> apiPost(String path, Map<String, dynamic> body) async {
+Future<Map<String, dynamic>> apiPost(String path, Map<String, dynamic> body,
+    {Map<String, String>? headers}) async {
   final r = await http
       .post(Uri.parse('$apiBase$path'),
-          headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+          headers: {'Content-Type': 'application/json', ...?headers}, body: jsonEncode(body))
       .timeout(const Duration(seconds: 60));
   return decodeResponse(r);
 }

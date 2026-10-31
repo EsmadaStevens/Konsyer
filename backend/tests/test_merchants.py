@@ -177,3 +177,60 @@ def test_verify_is_repeatable_and_picks_up_new_listings(conn):
     assert merchants.verify(conn, mid) == {"merchant_id": mid, "verified": True, "listings_verified": 1}
     events = [r["event"] for r in conn.execute("SELECT event FROM audit_log")]
     assert events.count("merchant_verified") == 2 and "listing_claimed" in events
+
+
+# ---------- social link, owner list, admin list, migration ----------
+def test_social_link_is_validated_and_stored(conn):
+    mid = signup(conn, social_url="https://www.facebook.com/PianoCoLusaka")
+    assert merchants.get_merchant(conn, 2, mid)["social_url"] == "https://www.facebook.com/PianoCoLusaka"
+    for bad in ("facebook.com/piano", "javascript:alert(1)", "https://x y.com"):
+        with pytest.raises(merchants.MerchantError):
+            merchants.register(conn, 2, {"name": "X", "social_url": bad})
+    assert merchants.get_merchant(conn, 2, signup(conn, name="No link"))["social_url"] is None
+
+
+def test_owner_sees_only_their_own_real_merchants(conn):
+    mid = signup(conn)
+    merchants.add_listing(conn, 2, mid, listing_fields(), TODAY)
+    mine = merchants.list_for_owner(conn, 2)
+    assert [m["merchant_id"] for m in mine] == [mid] and mine[0]["listings"][0]["status"] == "claimed"
+    assert merchants.list_for_owner(conn, 1) == []          # sample merchants and other users' businesses are not listed
+
+
+def test_admin_list_puts_merchants_needing_review_first(conn):
+    a, b = signup(conn, name="Verified Co"), signup(conn, name="Pending Co")
+    merchants.add_listing(conn, 2, a, listing_fields(), TODAY)
+    merchants.verify(conn, a)
+    merchants.add_listing(conn, 2, b, listing_fields(title="Other"), TODAY)
+    rows = merchants.admin_list(conn)
+    assert [r["name"] for r in rows] == ["Pending Co", "Verified Co"]
+    assert rows[0]["needs_review"] and rows[0]["claimed_listings"] == 1 and not rows[1]["needs_review"]
+    assert all(r["name"] != "Sample Go-Karting Track (sample merchant)" for r in rows)
+
+
+def test_api_list_and_admin_endpoints(client):
+    mid = client.post("/merchants", json={"user_id": 1, "name": "Piano Co",
+                                           "social_url": "https://www.facebook.com/PianoCo"}).json()["merchant_id"]
+    mine = client.get("/merchants", params={"user_id": 1}).json()["merchants"]
+    assert mine[0]["merchant_id"] == mid and mine[0]["social_url"] == "https://www.facebook.com/PianoCo"
+    assert client.get("/admin/merchants").status_code == 403
+    assert client.get("/admin/merchants", headers={"X-Admin-Key": "wrong"}).status_code == 403
+    rows = client.get("/admin/merchants", headers={"X-Admin-Key": KEY}).json()["merchants"]
+    assert rows[0]["merchant_id"] == mid and rows[0]["verified"] is False
+    assert client.post("/merchants", json={"user_id": 1, "name": "Bad", "social_url": "nope"}).status_code == 422
+
+
+def test_old_database_without_social_url_is_upgraded(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE merchants(id INTEGER PRIMARY KEY, name TEXT NOT NULL, owner_user_id INTEGER, "
+                "whatsapp TEXT, area TEXT, verified INTEGER NOT NULL DEFAULT 0, is_sample INTEGER NOT NULL DEFAULT 0)")
+    old.execute("INSERT INTO merchants(name) VALUES ('Old Co')")
+    old.commit()
+    old.close()
+    c = get_conn(str(path))
+    init_db(c)
+    assert "social_url" in {r[1] for r in c.execute("PRAGMA table_info(merchants)")}
+    assert c.execute("SELECT name FROM merchants").fetchone()["name"] == "Old Co"
+    init_db(c)                                               # running it again is harmless

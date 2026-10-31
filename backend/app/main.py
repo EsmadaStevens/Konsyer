@@ -70,6 +70,7 @@ class MerchantIn(BaseModel):
     name: str
     area: Optional[str] = None
     whatsapp: Optional[str] = None
+    social_url: Optional[str] = None
 
 
 class SlotIn(BaseModel):
@@ -215,6 +216,20 @@ def _merchant_call(fn, *args):
         raise HTTPException(status_code=merchants.STATUS.get(e.code, 400), detail=e.message)
 
 
+def _require_admin(key):
+    """Only a caller holding KONSYER_ADMIN_KEY (set in .env) is an admin. If the key is unset, admin is disabled."""
+    expected = os.environ.get("KONSYER_ADMIN_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=403, detail="Admin is disabled (no KONSYER_ADMIN_KEY set).")
+    if not hmac.compare_digest(key.encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Wrong admin key.")
+
+
+@app.get("/merchants")
+def my_merchants(user_id: int = 1, conn=Depends(db)):
+    return {"merchants": merchants.list_for_owner(conn, user_id)}
+
+
 @app.post("/merchants")
 def register_merchant(body: MerchantIn, conn=Depends(db)):
     return _merchant_call(merchants.register, conn, body.user_id, body.model_dump())
@@ -233,10 +248,11 @@ def get_merchant(merchant_id: int, user_id: int = 1, conn=Depends(db)):
 
 @app.post("/admin/merchants/{merchant_id}/verify")
 def verify_merchant(merchant_id: int, x_admin_key: str = Header(default=""), conn=Depends(db)):
-    """Only a caller holding KONSYER_ADMIN_KEY (set in .env) can verify. If the key is unset, this is disabled."""
-    expected = os.environ.get("KONSYER_ADMIN_KEY", "")
-    if not expected:
-        raise HTTPException(status_code=403, detail="Admin verification is disabled (no KONSYER_ADMIN_KEY set).")
-    if not hmac.compare_digest(x_admin_key.encode(), expected.encode()):
-        raise HTTPException(status_code=403, detail="Wrong admin key.")
+    _require_admin(x_admin_key)
     return _merchant_call(merchants.verify, conn, merchant_id)
+
+
+@app.get("/admin/merchants")
+def admin_merchants(x_admin_key: str = Header(default=""), conn=Depends(db)):
+    _require_admin(x_admin_key)
+    return {"merchants": merchants.admin_list(conn)}

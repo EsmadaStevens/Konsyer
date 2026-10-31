@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS profiles(
   memory TEXT DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS merchants(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, owner_user_id INTEGER REFERENCES users(id),
-  whatsapp TEXT, area TEXT, verified INTEGER NOT NULL DEFAULT 0, is_sample INTEGER NOT NULL DEFAULT 0);
+  whatsapp TEXT, area TEXT, verified INTEGER NOT NULL DEFAULT 0, is_sample INTEGER NOT NULL DEFAULT 0,
+  social_url TEXT);
 CREATE TABLE IF NOT EXISTS venues(id INTEGER PRIMARY KEY, name TEXT NOT NULL, area TEXT, lat REAL, lng REAL);
 CREATE TABLE IF NOT EXISTS listings(
   id INTEGER PRIMARY KEY, merchant_id INTEGER REFERENCES merchants(id), venue_id INTEGER REFERENCES venues(id),
@@ -87,6 +88,14 @@ def get_conn(path: str = "concierge.db") -> sqlite3.Connection:
     return conn
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns that older databases lack (CREATE TABLE IF NOT EXISTS never changes an existing table)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(merchants)")}
+    if "social_url" not in cols:
+        conn.execute("ALTER TABLE merchants ADD COLUMN social_url TEXT")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()

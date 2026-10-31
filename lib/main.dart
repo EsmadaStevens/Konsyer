@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'admin_screen.dart';
 import 'api.dart';
+import 'contact_card.dart';
 import 'flyer_screen.dart';
+import 'merchant_screen.dart';
 
 void main() => runApp(const ConciergeApp());
 
@@ -43,13 +46,19 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _send() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty || _loading) return;
+    // The last few messages (text only) so the agent remembers what was said; cards are not sent.
+    final said = _msgs.where((m) => m.text.trim().isNotEmpty).toList();
+    final recent = said.length > 10 ? said.sublist(said.length - 10) : said;
+    final history = [
+      for (final m in recent) {'role': m.fromUser ? 'user' : 'assistant', 'content': m.text}
+    ];
     setState(() {
       _msgs.add(Msg(true, text));
       _loading = true;
       _ctrl.clear();
     });
     try {
-      final j = await apiPost('/chat', {'user_id': userId, 'message': text});
+      final j = await apiPost('/chat', {'user_id': userId, 'message': text, 'history': history});
       final cards = (j['cards'] as List? ?? []).cast<Map<String, dynamic>>();
       setState(() => _msgs.add(Msg(false, j['reply'] as String? ?? '', cards)));
     } catch (e) {
@@ -76,6 +85,18 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('Konsyer'),
         actions: [
+          IconButton(
+            tooltip: 'For businesses',
+            icon: const Icon(Icons.storefront_outlined),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const MerchantScreen())),
+          ),
+          IconButton(
+            tooltip: 'Demo admin console',
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const AdminScreen())),
+          ),
           IconButton(
             tooltip: 'Add a flyer',
             icon: const Icon(Icons.photo_camera_outlined),
@@ -145,7 +166,10 @@ class _Bubble extends StatelessWidget {
               child: Text(m.text),
             ),
             for (final c in m.cards)
-              if (c['type'] == 'plan') PlanCard(c),
+              if (c['type'] == 'plan')
+                PlanCard(c)
+              else if (c['type'] == 'contact')
+                ContactCard(c),
           ],
         ),
       ),
