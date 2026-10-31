@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import executor, flyers, merchants, wallet
+from . import escrow, executor, flyers, merchants, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -63,6 +63,34 @@ class FlyerConfirmIn(BaseModel):
     contact_phone: Optional[str] = None
     performers: list[str] = []
     availability_text: Optional[str] = None
+
+
+class HoldIn(BaseModel):
+    user_id: int = 1
+    amount_ngwee: int
+    what: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
+class PayoutCheckIn(BaseModel):
+    user_id: int = 1
+    payout_number: str
+
+
+class ReleaseIn(BaseModel):
+    user_id: int = 1
+    payout_number: Optional[str] = None
+    confirmed_number: Optional[str] = None
+    accept_warning: bool = False
+
+
+class ReportIn(BaseModel):
+    user_id: int = 1
+    reason: str
+
+
+class AdvanceIn(BaseModel):
+    hours: int
 
 
 class MerchantIn(BaseModel):
@@ -132,7 +160,8 @@ def get_wallet(user_id: int = 1, conn=Depends(db)):
         raise HTTPException(status_code=404, detail="user not found")
     txns = conn.execute("SELECT amount, kind, ref, created_at FROM wallet_txns WHERE user_id=? "
                         "ORDER BY id DESC LIMIT 10", (user_id,)).fetchall()
-    return {"sandbox": True, "balance": wallet.balance(conn, user_id),
+    escrow.sweep(conn, user_id)
+    return {"sandbox": True, "balance": wallet.balance(conn, user_id), "held": escrow.held_total(conn, user_id),
             "spent_today": wallet.spent_today(conn, user_id, lusaka_today()),
             "autonomy": p["autonomy"], "per_purchase_cap": p["per_purchase_cap"], "daily_cap": p["daily_cap"],
             "recent": [dict(t) for t in txns]}
@@ -256,3 +285,66 @@ def verify_merchant(merchant_id: int, x_admin_key: str = Header(default=""), con
 def admin_merchants(x_admin_key: str = Header(default=""), conn=Depends(db)):
     _require_admin(x_admin_key)
     return {"merchants": merchants.admin_list(conn)}
+
+
+# ---------- escrow vouchers (sandbox money held between a user and a seller; payouts are simulated) ----------
+def _escrow_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except escrow.EscrowError as e:
+        raise HTTPException(status_code=escrow.STATUS.get(e.code, 400), detail=e.message)
+
+
+@app.get("/vouchers")
+def my_vouchers(user_id: int = 1, conn=Depends(db)):
+    return {"sandbox": True, "held": escrow.held_total(conn, user_id),
+            "vouchers": _escrow_call(escrow.list_for_user, conn, user_id)}
+
+
+@app.post("/leads/{lead_id}/hold")
+def hold_for_lead(lead_id: int, body: HoldIn, conn=Depends(db)):
+    return _escrow_call(escrow.create_lead_hold, conn, body.user_id, lead_id, body.amount_ngwee, body.what,
+                        body.idempotency_key)
+
+
+@app.post("/vouchers/{voucher_id}/payout-check")
+def voucher_payout_check(voucher_id: int, body: PayoutCheckIn, conn=Depends(db)):
+    return _escrow_call(escrow.payout_check, conn, body.user_id, voucher_id, body.payout_number)
+
+
+@app.post("/vouchers/{voucher_id}/release")
+def release_voucher(voucher_id: int, body: ReleaseIn, conn=Depends(db)):
+    return _escrow_call(escrow.release, conn, body.user_id, voucher_id, body.payout_number, body.confirmed_number,
+                        body.accept_warning)
+
+
+@app.post("/vouchers/{voucher_id}/cancel")
+def cancel_voucher(voucher_id: int, body: ActionIn, conn=Depends(db)):
+    return _escrow_call(escrow.cancel, conn, body.user_id, voucher_id)
+
+
+@app.post("/vouchers/{voucher_id}/report")
+def report_voucher(voucher_id: int, body: ReportIn, conn=Depends(db)):
+    return _escrow_call(escrow.report, conn, body.user_id, voucher_id, body.reason)
+
+
+@app.get("/merchants/{merchant_id}/vouchers")
+def merchant_vouchers(merchant_id: int, user_id: int = 1, conn=Depends(db)):
+    return {"vouchers": _escrow_call(escrow.list_for_merchant, conn, user_id, merchant_id)}
+
+
+@app.post("/vouchers/{voucher_id}/merchant-confirm")
+def voucher_merchant_confirm(voucher_id: int, body: ActionIn, conn=Depends(db)):
+    return _escrow_call(escrow.merchant_confirm, conn, body.user_id, voucher_id)
+
+
+@app.post("/vouchers/{voucher_id}/merchant-cancel")
+def voucher_merchant_cancel(voucher_id: int, body: ActionIn, conn=Depends(db)):
+    return _escrow_call(escrow.merchant_cancel, conn, body.user_id, voucher_id)
+
+
+@app.post("/admin/advance-time")
+def advance_time(body: AdvanceIn, x_admin_key: str = Header(default=""), conn=Depends(db)):
+    """DEMO ONLY: move the app's clock forward so a video can show the 24-hour auto-release."""
+    _require_admin(x_admin_key)
+    return _escrow_call(escrow.advance, conn, body.hours)

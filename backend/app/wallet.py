@@ -28,7 +28,7 @@ def spent_today(conn, user_id, today) -> int:
     end = start + timedelta(days=1)
     return conn.execute(
         "SELECT COALESCE(-SUM(amount),0) FROM wallet_txns "
-        "WHERE user_id=? AND kind='purchase' AND created_at>=? AND created_at<?",
+        "WHERE user_id=? AND kind IN ('purchase','hold','refund') AND created_at>=? AND created_at<?",
         (user_id, start.strftime(_FMT), end.strftime(_FMT))).fetchone()[0]
 
 
@@ -54,7 +54,7 @@ def topup(conn, user_id, amount, key, ref="sandbox top-up") -> dict:
     return {"duplicate": False, "balance": balance(conn, user_id)}
 
 
-def debit(conn, user_id, amount, key, ref="") -> dict:
+def debit(conn, user_id, amount, key, ref="", kind="purchase") -> dict:
     amount = int(amount)
     if amount <= 0:
         raise WalletError("amount must be more than zero")
@@ -65,5 +65,25 @@ def debit(conn, user_id, amount, key, ref="") -> dict:
     if cur.rowcount == 0:
         raise InsufficientFunds("not enough money in the wallet")
     conn.execute("INSERT INTO wallet_txns(user_id, amount, kind, idempotency_key, ref) VALUES (?,?,?,?,?)",
-                 (user_id, -amount, "purchase", key, ref))
+                 (user_id, -amount, kind, key, ref))
     return {"duplicate": False, "balance": balance(conn, user_id)}
+
+
+def refund(conn, user_id, amount, key, ref="") -> dict:
+    """Money coming back from a held voucher. Counts against spent_today (it reduces it)."""
+    amount = int(amount)
+    if amount <= 0:
+        raise WalletError("amount must be more than zero")
+    if _existing(conn, key, user_id):
+        return {"duplicate": True, "balance": balance(conn, user_id)}
+    conn.execute("UPDATE wallets SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+    conn.execute("INSERT INTO wallet_txns(user_id, amount, kind, idempotency_key, ref) VALUES (?,?,?,?,?)",
+                 (user_id, amount, "refund", key, ref))
+    return {"duplicate": False, "balance": balance(conn, user_id)}
+
+
+def note(conn, user_id, kind, key, ref=""):
+    """A zero-amount ledger line (for example 'release': the money already left the balance when it was held)."""
+    if not conn.execute("SELECT 1 FROM wallet_txns WHERE idempotency_key=?", (key,)).fetchone():
+        conn.execute("INSERT INTO wallet_txns(user_id, amount, kind, idempotency_key, ref) VALUES (?,?,?,?,?)",
+                     (user_id, 0, kind, key, ref))

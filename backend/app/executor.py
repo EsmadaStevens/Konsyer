@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 
 
-from . import policy, wallet
+from . import escrow, policy, wallet
 from .money import fmt_k
 from .timeutil import lusaka_today, to_local
 
@@ -142,7 +142,10 @@ def _approve_locked(conn, user_id, action_id, today):
             "VALUES (?,?,?,?,?,?,?,?)",
             (plan_item_id, user_id, listing["id"], slot["id"], payload["qty"], amount, qr, "confirmed")).lastrowid
         result["booking"] = {"booking_id": bid, "qr_token": qr}
-        why = f"Booked {payload['label']} for {fmt_k(amount)} from your sandbox wallet."
+        vid = escrow.hold_booking(conn, user_id, bid, listing, slot, amount, payload.get("label", "Booking"))
+        result["voucher_id"] = vid
+        why = (f"Booked {payload['label']} for {fmt_k(amount)} from your sandbox wallet. "
+               "The money is held by Konsyer until you check in.")
     else:
         why = f"Ride home scheduled for {fmt_k(amount)} (simulated provider, sandbox wallet)."
     _set_status(conn, action_id, "executed")
@@ -197,4 +200,3 @@ def list_pending(conn, user_id):
                     "amount": r["amount"], "decision": r["policy_decision"], "reason": r["policy_reason"],
                     "status": r["status"]})
     return out
-
