@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import disputes, escrow, executor, flyers, leads, merchants, wallet
+from . import activity, disputes, escrow, executor, flyers, leads, merchants, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -20,6 +20,7 @@ from .seed import seed
 from .timeutil import lusaka_today
 
 app = FastAPI(title="Konsyer API")
+activity.install()
 # Wide open for the hackathon; tighten to the deployed web origin before going live.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -427,3 +428,9 @@ def resolve_dispute_as_admin(dispute_id: int, body: AdminResolveIn, x_admin_key:
                              conn=Depends(db)):
     _require_admin(x_admin_key)
     return _dispute_call(disputes.resolve, conn, 0, dispute_id, body.decision, True)
+
+
+# ---------- activity: what the models did, and what rules and people decided ----------
+@app.get("/activity")
+def get_activity(user_id: int = 1, limit: int = 40, conn=Depends(db)):
+    return activity.view(conn, user_id, limit)

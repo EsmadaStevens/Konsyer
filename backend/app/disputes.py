@@ -20,7 +20,7 @@ from typing import Callable, Optional
 from . import escrow
 from .contact import one_line
 from .flyers import detect_image
-from .llm import LLMError, chat
+from .llm import LLMError, as_job, chat
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_ATTEMPTS = 3
@@ -140,11 +140,12 @@ def assess(listing_text, note, image: bytes, llm_chat: Optional[Callable] = None
     url = f"data:{mime};base64," + base64.b64encode(image).decode()
     caller = llm_chat or chat
     try:
-        choice = caller([{"role": "user", "content": [{"type": "text", "text": text},
-                                                      {"type": "image_url", "image_url": {"url": url}}]}],
-                        response_format={"type": "json_schema",
-                                         "json_schema": {"name": "dispute", "schema": SCHEMA, "strict": True}},
-                        max_tokens=8000)
+        with as_job("dispute_vision"):
+            choice = caller([{"role": "user", "content": [{"type": "text", "text": text},
+                                                          {"type": "image_url", "image_url": {"url": url}}]}],
+                            response_format={"type": "json_schema",
+                                             "json_schema": {"name": "dispute", "schema": SCHEMA, "strict": True}},
+                            max_tokens=8000)
         content = (choice["message"].get("content") or "").strip()
         content = re.sub(r"^```(?:json)?|```$", "", content).strip()
         raw = json.loads(content) if content else {}

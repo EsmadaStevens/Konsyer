@@ -3,6 +3,12 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_database(monkeypatch, tmp_path):
+    """Model-call records go to the database named by KONSYER_DB; never let a test touch a real konsyer.db."""
+    monkeypatch.setenv("KONSYER_DB", str(tmp_path / "default.db"))
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_discovery_env(monkeypatch):
     for name in ("KONSYER_DEMO_LEAD_PHONE", "DISCOVERY_SHOW_PHONES", "DISCOVERY_MAX_TOOL_CALLS",
                  "DISCOVERY_REASONING_EFFORT", "DISCOVERY_REQUIRE_CITED", "META_API_BASE", "META_SEARCH_MODEL"):

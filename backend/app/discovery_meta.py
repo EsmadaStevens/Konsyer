@@ -3,11 +3,13 @@ The model's answer is only a list of CANDIDATES. Plain code re-validates every f
 must be one the search actually visited (annotations or search-call items)."""
 import json
 import os
+import time
 
 import httpx
 
 from . import config  # noqa: F401  (importing it loads the project .env)
 from .discovery import DiscoveryError
+from .llm import observe
 
 PROMPT = (
     "Use web search to find real businesses offering '{service}' in {area}, Lusaka, Zambia. "
@@ -83,6 +85,15 @@ class MetaDiscovery:
         return body
 
     def search_with_sources(self, service, area):
+        started = time.monotonic()
+        try:
+            return self._search_with_sources(service, area)
+        except Exception as e:
+            observe("web_search", self.model, False, (time.monotonic() - started) * 1000, type(e).__name__)
+            raise
+
+    def _search_with_sources(self, service, area):
+        started = time.monotonic()
         r = self._post(f"{self.base_url}/responses", timeout=self.timeout, json=self._body(service, area),
                        headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
         if r.status_code != 200:
@@ -92,9 +103,11 @@ class MetaDiscovery:
         if leads is None:
             raise DiscoveryError("could not read the search result")
         if os.environ.get("DISCOVERY_REQUIRE_CITED", "1") == "0":
+            observe("web_search", self.model, True, (time.monotonic() - started) * 1000)
             return leads, None
         if not cited:
             raise DiscoveryError("the search returned no sources to check")
+        observe("web_search", self.model, True, (time.monotonic() - started) * 1000)
         return leads, cited
 
     def search(self, service, area):

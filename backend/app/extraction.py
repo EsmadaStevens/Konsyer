@@ -7,7 +7,7 @@ import re
 from datetime import date
 from typing import Optional
 
-from .llm import chat, LLMError
+from .llm import as_job, chat, LLMError
 from .money import kwacha_to_ngwee
 
 _NS = lambda t: {"type": [t, "null"]}
@@ -199,14 +199,15 @@ def _data_url(path: str) -> str:
 
 def extract_flyer(image_path: str, today: Optional[date] = None) -> dict:
     today = today or date.today()
-    choice = chat(
-        [{"role": "user", "content": [
-            {"type": "text", "text": PROMPT},
-            {"type": "image_url", "image_url": {"url": _data_url(image_path)}}]}],
-        response_format={"type": "json_schema",
-                         "json_schema": {"name": "flyer", "schema": FLYER_SCHEMA, "strict": True}},
-        max_tokens=8000,
-    )
+    with as_job("flyer_vision"):
+        choice = chat(
+            [{"role": "user", "content": [
+                {"type": "text", "text": PROMPT},
+                {"type": "image_url", "image_url": {"url": _data_url(image_path)}}]}],
+            response_format={"type": "json_schema",
+                             "json_schema": {"name": "flyer", "schema": FLYER_SCHEMA, "strict": True}},
+            max_tokens=8000,
+        )
     content = (choice["message"].get("content") or "").strip()
     if not content:
         raise LLMError(f"empty answer (finish_reason={choice.get('finish_reason')}); raise max_tokens?")
