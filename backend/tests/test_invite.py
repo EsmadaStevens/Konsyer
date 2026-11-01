@@ -26,3 +26,19 @@ def test_verified_contact_gets_no_invite():
 def test_invite_strips_control_characters_and_length():
     msg = contact.build_invite("Evil\nName\x00 " + "x" * 200)
     assert "\n" not in msg and "\x00" not in msg and len(msg) < 600
+
+def test_message_drops_a_model_written_greeting_and_sign_off():
+    m = contact.build_message("Glow", "Hi, I'd like braids on Saturday afternoon in Kabulonga. Budget K300. Thanks!")
+    assert m.count("Hello") == 1 and "Thanks!." not in m and "Thank you." in m
+    assert "I'd like braids on Saturday afternoon in Kabulonga. Budget K300." in m
+    assert "booking assistant" not in m and "I'm looking for: I" not in m
+
+
+def test_message_with_a_plain_request_uses_looking_for():
+    m = contact.build_message("Glow", "gel nails, Saturday")
+    assert "I'm looking for: gel nails, Saturday." in m
+
+
+def test_message_without_details_stays_generic_and_has_no_payment_talk():
+    m = contact.build_message("Glow", "")
+    assert "interested in your services" in m and "pay" not in m.lower().replace("price", "")
