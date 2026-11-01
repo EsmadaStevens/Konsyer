@@ -1,6 +1,6 @@
 """Escrow ledger (SANDBOX money, simulated payouts). Plain code, no LLM.
 
-A voucher is money held by Konsyer between a user and a seller:
+A voucher is money held in escrow between a user and a seller (in production, by a licensed payment partner):
   held -> released   (seller is paid)
   held -> refunded   (user gets everything back)
   held -> forfeited  (late cancel: the seller keeps part, the user gets the rest back)
@@ -360,12 +360,12 @@ def _policy_text(v) -> str:
     if v["state"] != "held":
         return ""
     if not v["payee_verified"]:
-        return ("This seller is not verified. Konsyer only pays them when you tap Release. You can cancel for a "
+        return ("This seller is not verified. The money is only paid out when you tap Release. You can cancel for a "
                 f"full refund any time. If you do nothing, the money returns to your wallet on "
                 f"{fmt_local(v['expires_at'])}.")
     cancel = (f"Free cancellation until {fmt_local(v['free_cancel_until'])}; after that the seller keeps "
               f"{v['forfeit_pct']}%." if v["forfeit_pct"] else "You can cancel for a full refund any time.")
-    return (f"Held by Konsyer until you check in. {cancel} If nobody objects, it is released to the seller on "
+    return (f"Held in escrow until you check in. {cancel} If nobody objects, it is released to the seller on "
             f"{fmt_local(v['auto_release_at'])}.")
 
 

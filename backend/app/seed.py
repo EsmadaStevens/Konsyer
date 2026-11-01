@@ -48,6 +48,11 @@ def seed(conn, today):
             "Kabulonga", 1, 0.9,
             desc="French tips gel set: nude pink base with clean white tips, square shape, glossy finish.",
             slots=[(sat, 10, 0, sat, 12, 0, 6), (sat, 13, 0, sat, 15, 0, 6)])
+    listing("Sample Press-On Nails", "service", 12000, ["nails", "beauty", "press-on", "stick-on", "delivery"],
+            -15.4120, 28.3080, "Kabulonga", 1, 0.9,
+            desc="Press-on nail set, 24 pieces: nude pink base with white French tips, almond shape, glossy finish. "
+                 "Delivered in the window shown.",
+            slots=[(sat, 10, 0, sat, 12, 0, 10), (sat, 14, 0, sat, 16, 0, 10)])
     listing("Sample Nail Studio", "service", 30000, ["nails", "beauty", "salon"], -15.4150, 28.2900,
             "Northmead", 0, 0.45, source="web_lead", desc="Gel nails. Contact details unverified.")
     conn.commit()

@@ -3,7 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import '../api.dart';
 import '../dispute_card.dart';
 
-/// "Held payments": money Konsyer holds between you and a seller.
+/// "Held payments": money held in escrow between you and a seller (sandbox; a licensed payment partner in production).
 /// Sandbox money and simulated payouts: nothing real moves. Money reaches an unverified seller only when
 /// you confirm a mobile-money number on screen; the server checks that number, not this screen.
 class VouchersScreen extends StatefulWidget {
@@ -347,7 +347,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
                   onRefresh: _load,
                   child: ListView(padding: const EdgeInsets.all(16), children: [
                     Text(
-                      'Sandbox money, simulated payouts. Konsyer holds the money until you confirm. '
+                      'Sandbox money, simulated payouts. The money is held in escrow until you confirm; in production a licensed payment partner holds it. '
                       'For verified businesses it is also released 30 minutes after the service ends if nobody objects.',
                       style: Theme.of(context).textTheme.labelMedium,
                     ),

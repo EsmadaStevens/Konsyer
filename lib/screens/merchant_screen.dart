@@ -262,7 +262,7 @@ class _MerchantScreenState extends State<MerchantScreen> {
             trailing: _statusChip(l['status'].toString()),
           ),
         const SizedBox(height: 16),
-        Text('Customer bookings (payment held by Konsyer)', style: t.titleSmall),
+        Text('Customer bookings (payment held in escrow)', style: t.titleSmall),
         const Divider(),
         if (bookings.isEmpty) const Text('No bookings yet.'),
         for (final v in bookings) _booking(v),
