@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../api.dart';
+import '../dispute_card.dart';
 
-/// "Held payments": money Konsyer holds between you and a seller.
+/// "Held payments": money held in escrow between you and a seller (sandbox; a licensed payment partner in production).
 /// Sandbox money and simulated payouts: nothing real moves. Money reaches an unverified seller only when
 /// you confirm a mobile-money number on screen; the server checks that number, not this screen.
 class VouchersScreen extends StatefulWidget {
@@ -184,6 +186,49 @@ class _VouchersScreenState extends State<VouchersScreen> {
     });
   }
 
+  /// "Not as described": the customer adds a photo of what they got. The model compares it with the listing and
+  /// only recommends; a person decides before any refund.
+  Future<void> _dispute(Map<String, dynamic> v) async {
+    final note = TextEditingController();
+    final src = await showDialog<ImageSource>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Not as described?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Add a clear, well-lit photo of what you received. Konsyer compares it with the listing. '
+              'A person reviews it before any refund, and your money stays held meanwhile. The photo is not stored.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: note,
+            maxLength: 300,
+            decoration: const InputDecoration(labelText: 'What is different? (optional)', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          OutlinedButton(onPressed: () => Navigator.pop(c, ImageSource.camera), child: const Text('Take photo')),
+          FilledButton(onPressed: () => Navigator.pop(c, ImageSource.gallery), child: const Text('Choose photo')),
+        ],
+      ),
+    );
+    if (src == null) return;
+    setState(() => _busy = true);
+    try {
+      final x = await ImagePicker().pickImage(source: src, maxWidth: 1600, imageQuality: 85);
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      final j = await apiUpload('/vouchers/${v['id']}/dispute', {'user_id': '$userId', 'note': note.text.trim()},
+          bytes, x.name, field: 'photo');
+      final d = (j['dispute'] as Map?)?.cast<String, dynamic>();
+      _toast(d == null ? 'Photo checked.' : (d['message'] ?? 'Photo checked.').toString());
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _report(Map<String, dynamic> v) async {
     final reason = await showModalBottomSheet<String>(
       context: context,
@@ -221,6 +266,8 @@ class _VouchersScreenState extends State<VouchersScreen> {
     final verified = v['payee_verified'] == true;
     final community = v['community'] == true;
     final canReport = v['can_report'] == true;
+    final canDispute = v['can_dispute'] == true;
+    final dispute = (v['dispute'] as Map?)?.cast<String, dynamic>();
     final paid = (v['paid_amount'] as num).toInt();
     final back = (v['refunded_amount'] as num).toInt();
     return Card(
@@ -254,9 +301,21 @@ class _VouchersScreenState extends State<VouchersScreen> {
           if (!held && v['state'] == 'refunded') Text('${fmtK(back)} came back to your wallet.', style: t.bodySmall),
           if (!held && v['state'] == 'released')
             Text('Paid (simulated payout ${v['payout_ref'] ?? ''}).', style: t.bodySmall),
+          if (dispute != null) DisputeCard(dispute),
+          if (held && dispute != null && dispute['needs_human'] == true)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('Under review. Automatic release is paused while a person looks at this.',
+                  style: t.labelSmall),
+            ),
           if (held) ...[
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
+              if (canDispute)
+                OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _dispute(v),
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: Text(dispute != null && dispute['can_retry'] == true ? 'Try another photo' : 'Not as described')),
               FilledButton(
                   onPressed: _busy ? null : () => _release(v), child: const Text('I received it')),
               OutlinedButton(onPressed: _busy ? null : () => _cancel(v), child: const Text('Cancel')),
@@ -288,8 +347,8 @@ class _VouchersScreenState extends State<VouchersScreen> {
                   onRefresh: _load,
                   child: ListView(padding: const EdgeInsets.all(16), children: [
                     Text(
-                      'Sandbox money, simulated payouts. Konsyer holds the money until you confirm. '
-                      'For verified businesses it is also released 24 hours after the service if nobody objects.',
+                      'Sandbox money, simulated payouts. The money is held in escrow until you confirm; in production a licensed payment partner holds it. '
+                      'For verified businesses it is also released 30 minutes after the service ends if nobody objects.',
                       style: Theme.of(context).textTheme.labelMedium,
                     ),
                     const SizedBox(height: 8),

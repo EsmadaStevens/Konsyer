@@ -145,7 +145,7 @@ def _approve_locked(conn, user_id, action_id, today):
         vid = escrow.hold_booking(conn, user_id, bid, listing, slot, amount, payload.get("label", "Booking"))
         result["voucher_id"] = vid
         why = (f"Booked {payload['label']} for {fmt_k(amount)} from your sandbox wallet. "
-               "The money is held by Konsyer until you check in.")
+               "The money is held in escrow (sandbox) until you check in.")
     else:
         why = f"Ride home scheduled for {fmt_k(amount)} (simulated provider, sandbox wallet)."
     _set_status(conn, action_id, "executed")

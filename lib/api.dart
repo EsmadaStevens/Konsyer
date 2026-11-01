@@ -54,10 +54,11 @@ Future<Map<String, dynamic>> apiPost(String path, Map<String, dynamic> body,
 }
 
 Future<Map<String, dynamic>> apiUpload(
-    String path, Map<String, String> fields, List<int> bytes, String filename) async {
+    String path, Map<String, String> fields, List<int> bytes, String filename,
+    {String field = 'image'}) async {
   final req = http.MultipartRequest('POST', Uri.parse('$apiBase$path'))
     ..fields.addAll(fields)
-    ..files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
+    ..files.add(http.MultipartFile.fromBytes(field, bytes, filename: filename));
   final streamed = await req.send().timeout(const Duration(seconds: 90));
   return decodeResponse(await http.Response.fromStream(streamed));
 }

@@ -65,7 +65,7 @@ def test_booking_creates_held_voucher_with_policy_snapshot(conn):
     assert escrow.held_total(conn, 1) == 30000
     assert iso_dt(v["free_cancel_until"]) == iso_dt(s["starts_at"]) - timedelta(hours=24)
     assert v["forfeit_pct"] == 50
-    assert iso_dt(v["auto_release_at"]) == iso_dt(s["ends_at"]) + timedelta(hours=24)
+    assert iso_dt(v["auto_release_at"]) == iso_dt(s["ends_at"]) + timedelta(minutes=30)
 
 
 def test_free_cancel_gives_everything_back_and_frees_the_slot(conn):
@@ -104,12 +104,12 @@ def test_user_release_pays_seller_once(conn):
         escrow.cancel(conn, 1, vid)
 
 
-def test_auto_release_after_24h_but_not_before(conn):
+def test_auto_release_after_30_minutes_but_not_before(conn):
     vid, s = book(conn)
     end = iso_dt(s["ends_at"])
-    assert escrow.sweep(conn, 1, end + timedelta(hours=23)) == 0
+    assert escrow.sweep(conn, 1, end + timedelta(minutes=29)) == 0
     assert voucher(conn, vid)["state"] == "held"
-    assert escrow.sweep(conn, 1, end + timedelta(hours=25)) == 1
+    assert escrow.sweep(conn, 1, end + timedelta(minutes=31)) == 1
     v = voucher(conn, vid)
     assert v["state"] == "released" and v["resolution"] == "auto_released"
 

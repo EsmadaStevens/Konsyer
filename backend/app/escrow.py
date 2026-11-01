@@ -1,6 +1,6 @@
 """Escrow ledger (SANDBOX money, simulated payouts). Plain code, no LLM.
 
-A voucher is money held by Konsyer between a user and a seller:
+A voucher is money held in escrow between a user and a seller (in production, by a licensed payment partner):
   held -> released   (seller is paid)
   held -> refunded   (user gets everything back)
   held -> forfeited  (late cancel: the seller keeps part, the user gets the rest back)
@@ -8,7 +8,7 @@ A voucher is money held by Konsyer between a user and a seller:
 Rules:
  * Only a human tap (an endpoint called by the app) creates, releases or refunds a voucher. The agent has no tool for it.
  * A VERIFIED seller (booking through the app): the deposit policy is fixed at booking time. If nobody objects, the
-   money is released 24 hours after the service ends.
+   money is released 30 minutes after the service ends.
  * An UNVERIFIED seller (outside lead or flyer listing): the seller never agreed to anything, so the user can always
    cancel for a full refund, and money NEVER reaches them unless the user taps Release and confirms the payout number
    (typed into a dedicated field, validated here, shown back, and checked against the number on file).
@@ -27,7 +27,7 @@ from .money import fmt_k
 from .providers.payout import get_payout
 from .timeutil import fmt_local, lusaka_today, parse_utc, to_utc_iso
 
-AUTO_RELEASE_HOURS = 24
+AUTO_RELEASE_MINUTES = 30  # sellers should not wait a day; the buyer can still dispute until then
 UNVERIFIED_EXPIRY_DAYS = 7
 MIN_HOLD = 100  # K1
 REPORT_REASONS = {"seller_cancelled", "not_delivered", "looks_like_scam", "closed_or_unreachable"}
@@ -184,7 +184,7 @@ def hold_booking(conn, user_id, booking_id, listing, slot, amount, label, at=Non
     if verified:
         free_until = _iso(parse_utc(starts) - timedelta(hours=int(listing["cancel_free_hours"])))
         forfeit = int(listing["late_forfeit_pct"])
-        auto_at, expires = _iso(parse_utc(ends) + timedelta(hours=AUTO_RELEASE_HOURS)), None
+        auto_at, expires = _iso(parse_utc(ends) + timedelta(minutes=AUTO_RELEASE_MINUTES)), None
     else:  # unverified seller: always a full refund on cancel, never auto-paid
         free_until, forfeit, auto_at = None, 0, None
         expires = _iso(parse_utc(ends) + timedelta(days=UNVERIFIED_EXPIRY_DAYS))
@@ -336,11 +336,13 @@ def sweep(conn, user_id=None, at=None) -> int:
     at = at or now(conn)
     stamp, n = _iso(at), 0
     with _transaction(conn):
-        rows = conn.execute("SELECT * FROM vouchers WHERE state='held' AND (? IS NULL OR user_id=?)",
-                            (user_id, user_id)).fetchall()
+        rows = conn.execute(  # money is not auto-settled while a person is reviewing a photo dispute
+            "SELECT * FROM vouchers WHERE state='held' AND (? IS NULL OR user_id=?) AND NOT EXISTS "
+            "(SELECT 1 FROM disputes d WHERE d.voucher_id=vouchers.id AND d.status='open')",
+            (user_id, user_id)).fetchall()
         for v in rows:
             if v["auto_release_at"] and v["auto_release_at"] <= stamp:
-                _release(conn, v, v["payee_phone"], "nobody objected for 24 hours", "auto_released", at)
+                _release(conn, v, v["payee_phone"], "nobody objected within 30 minutes of the service ending", "auto_released", at)
                 n += 1
             elif v["expires_at"] and v["expires_at"] <= stamp:
                 _refund(conn, v, "expired", at)
@@ -358,12 +360,12 @@ def _policy_text(v) -> str:
     if v["state"] != "held":
         return ""
     if not v["payee_verified"]:
-        return ("This seller is not verified. Konsyer only pays them when you tap Release. You can cancel for a "
+        return ("This seller is not verified. The money is only paid out when you tap Release. You can cancel for a "
                 f"full refund any time. If you do nothing, the money returns to your wallet on "
                 f"{fmt_local(v['expires_at'])}.")
     cancel = (f"Free cancellation until {fmt_local(v['free_cancel_until'])}; after that the seller keeps "
               f"{v['forfeit_pct']}%." if v["forfeit_pct"] else "You can cancel for a full refund any time.")
-    return (f"Held by Konsyer until you check in. {cancel} If nobody objects, it is released to the seller on "
+    return (f"Held in escrow until you check in. {cancel} If nobody objects, it is released to the seller on "
             f"{fmt_local(v['auto_release_at'])}.")
 
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '/screens/activity_screen.dart';
 import '/screens/admin_screen.dart';
 import '/api.dart';
 import '/contact_card.dart';
@@ -91,6 +92,12 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: const Icon(Icons.storefront_outlined),
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const MerchantScreen())),
+          ),
+          IconButton(
+            tooltip: 'Activity: what the models did',
+            icon: const Icon(Icons.timeline_outlined),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
           ),
           IconButton(
             tooltip: 'Demo admin console',
