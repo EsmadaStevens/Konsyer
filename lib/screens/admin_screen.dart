@@ -5,7 +5,6 @@ import '../dispute_card.dart';
 
 /// Konsyer admin: verify businesses and decide photo reviews. The admin key is typed here each time and never saved.
 /// A production version would live behind real admin sign-in, not in the customer app.
-/// A production version would live behind real admin sign-in, not in the customer app.
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
   @override
