@@ -6,7 +6,7 @@ import uuid
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -91,6 +91,11 @@ class ResolveIn(BaseModel):
 
 class AdminResolveIn(BaseModel):
     decision: str
+
+
+class ContestIn(BaseModel):
+    user_id: int = 1
+    note: str
 
 
 class PayoutCheckIn(BaseModel):
@@ -415,6 +420,31 @@ def dispute_voucher(voucher_id: int, photo: UploadFile = File(...), note: str = 
 @app.post("/disputes/{dispute_id}/resolve")
 def resolve_dispute_as_business(dispute_id: int, body: ResolveIn, conn=Depends(db)):
     return _dispute_call(disputes.resolve, conn, body.user_id, dispute_id, body.decision)
+
+
+@app.post("/disputes/{dispute_id}/contest")
+def contest_dispute(dispute_id: int, body: ContestIn, conn=Depends(db)):
+    """The seller disagrees: the case goes to Konsyer. The seller cannot reject a claim themselves."""
+    return _dispute_call(disputes.contest, conn, body.user_id, dispute_id, body.note)
+
+
+_PHOTO_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _photo_response(data: bytes):
+    return Response(content=data, media_type=_PHOTO_TYPES.get(disputes.detect_image(data), "application/octet-stream"),
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/disputes/{dispute_id}/photo")
+def dispute_photo_for_seller(dispute_id: int, user_id: int = 1, conn=Depends(db)):
+    return _photo_response(_dispute_call(disputes.photo, conn, user_id, dispute_id))
+
+
+@app.get("/admin/disputes/{dispute_id}/photo")
+def dispute_photo_for_admin(dispute_id: int, x_admin_key: str = Header(default=""), conn=Depends(db)):
+    _require_admin(x_admin_key)
+    return _photo_response(_dispute_call(disputes.photo, conn, 0, dispute_id, True))
 
 
 @app.get("/admin/disputes")

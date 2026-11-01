@@ -101,26 +101,59 @@ class _MerchantScreenState extends State<MerchantScreen> {
     }
   }
 
-  Future<void> _resolve(Map<String, dynamic> d, String decision) async {
-    final refund = decision == 'refund';
+  Future<void> _resolve(Map<String, dynamic> d) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(refund ? 'Refund the customer?' : 'Keep the payment?'),
-        content: Text(refund
-            ? 'The held money goes back to the customer in full.'
-            : 'The claim is rejected. The payment continues as normal and is released after the usual wait.'),
+        title: const Text('Refund the customer?'),
+        content: const Text('The held money goes back to the customer in full.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(refund ? 'Refund' : 'Keep payment')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Refund')),
         ],
       ),
     );
     if (ok != true) return;
     setState(() => busy = true);
     try {
-      await apiPost('/disputes/${d['id']}/resolve', {'user_id': userId, 'decision': decision});
-      _toast(refund ? 'Refunded. The customer got their money back.' : 'Claim rejected. The payment continues.');
+      await apiPost('/disputes/${d['id']}/resolve', {'user_id': userId, 'decision': 'refund'});
+      _toast('Refunded. The customer got their money back.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  /// You cannot reject a claim against yourself. Contesting sends it to Konsyer with your reason.
+  Future<void> _contest(Map<String, dynamic> d) async {
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Contest this claim?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Konsyer will review it and decide. The money stays held until then. Say briefly why you disagree.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: note,
+            maxLength: 500,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Your reason', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Send to Konsyer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => busy = true);
+    try {
+      await apiPost('/disputes/${d['id']}/contest', {'user_id': userId, 'note': note.text.trim()});
+      _toast('Sent to Konsyer. The money stays held until they decide.');
       await _load();
     } catch (e) {
       _toast('$e');
@@ -164,17 +197,21 @@ class _MerchantScreenState extends State<MerchantScreen> {
             ),
           if (held && v['can_confirm'] != true)
             Text('You can confirm once the booking time has started.', style: t.labelSmall),
-          if (dispute != null) DisputeCard(dispute),
+          if (dispute != null)
+            DisputeCard(dispute,
+                loadPhoto: v['can_resolve'] == true
+                    ? () => apiGetBytes('/disputes/${dispute['id']}/photo?user_id=$userId')
+                    : null),
           if (v['can_resolve'] == true && dispute != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Wrap(spacing: 8, runSpacing: 8, children: [
                 FilledButton(
-                    onPressed: busy ? null : () => _resolve(dispute, 'refund'),
+                    onPressed: busy ? null : () => _resolve(dispute),
                     child: const Text('Refund customer')),
                 OutlinedButton(
-                    onPressed: busy ? null : () => _resolve(dispute, 'reject'),
-                    child: const Text('Keep payment')),
+                    onPressed: busy ? null : () => _contest(dispute),
+                    child: const Text('Contest')),
               ]),
             ),
         ]),

@@ -210,7 +210,7 @@ def test_only_the_verified_business_owner_or_admin_can_decide(conn):
     assert r["dispute"]["status"] == "refunded" and r["dispute"]["resolved_by"].startswith("merchant:")
 
 
-def test_rejection_keeps_the_money_held_then_resumes_with_a_days_grace(conn):
+def test_rejection_keeps_the_money_held_then_resumes_after_a_short_grace(conn):
     vid = book(conn)
     did = disputes.open_dispute(conn, 1, vid, "", JPG, fake(verdict("mismatch")))["dispute"]["id"]
     late = parse_utc(voucher(conn, vid)["auto_release_at"]) + timedelta(days=3)
@@ -289,12 +289,112 @@ def test_a_model_outage_stores_nothing(conn):
     assert conn.execute("SELECT COUNT(*) FROM disputes").fetchone()[0] == 0
 
 
-def test_the_photo_itself_is_never_stored(conn):
+def test_the_photo_is_kept_only_while_a_review_is_open_and_never_in_logs(conn):
     vid = book(conn)
-    disputes.open_dispute(conn, 1, vid, "note", JPG, fake(verdict("mismatch")))
-    dump = json.dumps([dict(r) for r in conn.execute("SELECT * FROM disputes")], default=str)
-    dump += json.dumps([dict(r) for r in conn.execute("SELECT * FROM audit_log")], default=str)
-    assert "MARKER-NOT-STORED" not in dump and base64.b64encode(b"MARKER-NOT-STORED").decode()[:12] not in dump
+    img = JPG + b"MARKER-NOT-STORED"
+    did = disputes.open_dispute(conn, 1, vid, "note", img, fake(verdict("mismatch")))["dispute"]["id"]
+    assert conn.execute("SELECT photo FROM disputes WHERE id=?", (did,)).fetchone()["photo"] == img  # a person can look
+    logs = json.dumps([dict(r) for r in conn.execute("SELECT * FROM audit_log")], default=str)
+    assert "MARKER-NOT-STORED" not in logs and base64.b64encode(b"MARKER-NOT-STORED").decode()[:12] not in logs
+    disputes.resolve(conn, 0, did, "reject", admin=True)
+    assert conn.execute("SELECT photo FROM disputes WHERE id=?", (did,)).fetchone()["photo"] is None  # deleted
+
+
+def test_photos_are_never_stored_for_checks_that_find_no_problem(conn):
+    vid = book(conn)
+    did = disputes.open_dispute(conn, 1, vid, "", JPG, fake(verdict("match")))["dispute"]["id"]
+    assert conn.execute("SELECT photo FROM disputes WHERE id=?", (did,)).fetchone()["photo"] is None
+
+
+def open_case(conn):
+    vid = book(conn)
+    d = disputes.open_dispute(conn, 1, vid, "wrong colour", JPG, fake(verdict("mismatch")))["dispute"]
+    make_owner(conn, vid, 2)  # user 2 owns the verified business; users 1 (customer) and 3 are not the seller
+    return vid, d["id"]
+
+
+def test_a_new_case_waits_for_the_seller_with_a_deadline(conn):
+    vid, did = open_case(conn)
+    d = conn.execute("SELECT * FROM disputes WHERE id=?", (did,)).fetchone()
+    v = disputes._view(d)
+    assert v["stage"] == "seller" and v["reply_by"] and "48 hours" in v["message"] and v["has_photo"]
+
+
+def test_the_seller_can_refund_but_cannot_reject(conn):
+    vid, did = open_case(conn)
+    with pytest.raises(DisputeError) as e:
+        disputes.resolve(conn, 2, did, "reject")
+    assert e.value.code == "forbidden" and voucher(conn, vid)["state"] == "held"
+    r = disputes.resolve(conn, 2, did, "refund")
+    assert r["dispute"]["status"] == "refunded" and voucher(conn, vid)["state"] == "refunded"
+
+
+def test_contesting_sends_it_to_konsyer_and_locks_the_seller_out(conn):
+    vid, did = open_case(conn)
+    with pytest.raises(DisputeError):
+        disputes.contest(conn, 2, did, "  ")
+    r = disputes.contest(conn, 2, did, "The set matches the listing, almond shape is what she chose.")
+    assert r["dispute"]["stage"] == "konsyer" and r["dispute"]["escalated"] == "contested"
+    assert "almond" in r["dispute"]["seller_note"]
+    for call in (lambda: disputes.contest(conn, 2, did, "again please"), lambda: disputes.resolve(conn, 2, did, "refund")):
+        with pytest.raises(DisputeError) as e:
+            call()
+        assert e.value.code == "conflict"
+    assert voucher(conn, vid)["state"] == "held"  # still held until Konsyer decides
+    assert [x["id"] for x in disputes.list_open(conn)] == [did]
+    assert disputes.resolve(conn, 0, did, "reject", admin=True)["dispute"]["status"] == "rejected"
+
+
+def test_only_the_owner_of_a_verified_business_can_contest(conn):
+    vid, did = open_case(conn)
+    for who in (1, 3, 99):
+        with pytest.raises(DisputeError) as e:
+            disputes.contest(conn, who, did, "I disagree with this")
+        assert e.value.code == "not_found"
+
+
+def test_silence_for_48_hours_sends_it_to_konsyer_without_refunding(conn):
+    vid, did = open_case(conn)
+    created = parse_utc(conn.execute("SELECT created_at FROM disputes WHERE id=?", (did,)).fetchone()["created_at"])
+    assert disputes.escalate_overdue(conn, created + timedelta(hours=47)) == 0
+    assert disputes.escalate_overdue(conn, created + timedelta(hours=49)) == 1
+    d = disputes._view(conn.execute("SELECT * FROM disputes WHERE id=?", (did,)).fetchone())
+    assert d["stage"] == "konsyer" and d["escalated"] == "no_reply" and d["seller_note"] is None
+    assert voucher(conn, vid)["state"] == "held"
+    assert disputes.escalate_overdue(conn, created + timedelta(hours=60)) == 0  # only once
+
+
+def test_a_seller_cannot_pay_themselves_while_a_claim_is_open(conn):
+    vid, did = open_case(conn)
+    started = parse_utc(voucher(conn, vid)["starts_at"]) + timedelta(minutes=5)
+    with pytest.raises(escrow.EscrowError) as e:
+        escrow.merchant_confirm(conn, 2, vid, started)
+    assert e.value.code == "conflict" and voucher(conn, vid)["state"] == "held"
+    disputes.resolve(conn, 0, did, "reject", admin=True)  # once Konsyer has decided, the normal flow resumes
+    assert escrow.merchant_confirm(conn, 2, vid, started)["voucher"]["state"] == "released"
+
+
+def test_an_open_case_pauses_auto_release_even_after_it_goes_to_konsyer(conn):
+    vid, did = open_case(conn)
+    late = parse_utc(voucher(conn, vid)["auto_release_at"]) + timedelta(days=5)
+    disputes.contest(conn, 2, did, "I disagree with this claim")
+    assert escrow.sweep(conn, 1, late) == 0 and voucher(conn, vid)["state"] == "held"
+
+
+def test_the_photo_is_shown_only_to_whoever_must_decide(conn):
+    vid, did = open_case(conn)
+    assert disputes.photo(conn, 2, did) == JPG
+    assert disputes.photo(conn, 0, did, admin=True) == JPG
+    for who in (1, 3):
+        with pytest.raises(DisputeError):
+            disputes.photo(conn, who, did)
+    disputes.contest(conn, 2, did, "I disagree with this claim")
+    with pytest.raises(DisputeError):  # with Konsyer now: the seller no longer needs it
+        disputes.photo(conn, 2, did)
+    assert disputes.photo(conn, 0, did, admin=True) == JPG
+    disputes.resolve(conn, 0, did, "refund", admin=True)
+    with pytest.raises(DisputeError):
+        disputes.photo(conn, 0, did, admin=True)
 
 
 def test_attach_tells_the_app_what_the_user_can_do(conn):
@@ -387,3 +487,32 @@ def test_api_rejects_a_non_image_and_maps_model_outage(client, tmp_path, monkeyp
     monkeypatch.setattr(disputes, "assess", down)
     r = client.post(f"/vouchers/{vid}/dispute", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data={"user_id": "1"})
     assert r.status_code == 502
+
+
+def test_api_contest_and_photo_access(client, tmp_path, monkeypatch):
+    vid = api_book(tmp_path)
+    c = get_conn(str(tmp_path / "t.db"))
+    c.execute("INSERT INTO users(id, name) VALUES (2, 'Owner')")
+    make_owner(c, vid, 2)
+    mid = voucher(c, vid)["merchant_id"]
+    c.commit()
+    monkeypatch.setenv("LLM_API_KEY", "dummy")
+    monkeypatch.setattr(disputes, "assess", lambda listing, note, image, llm_chat=None: verdict("mismatch"))
+    client.post(f"/vouchers/{vid}/dispute", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data={"user_id": "1"})
+    did = client.get("/vouchers?user_id=1").json()["vouchers"][0]["dispute"]["id"]
+    mine = client.get(f"/merchants/{mid}/vouchers?user_id=2")
+    assert mine.status_code == 200 and mine.json()["vouchers"][0]["can_contest"] is True
+    # the customer cannot see the photo through the seller's door, a stranger cannot either
+    assert client.get(f"/disputes/{did}/photo?user_id=1").status_code == 404
+    seen = client.get(f"/disputes/{did}/photo?user_id=2")
+    assert seen.status_code == 200 and seen.content == JPG and seen.headers["cache-control"] == "no-store"
+    assert client.get(f"/admin/disputes/{did}/photo").status_code == 403
+    assert client.get(f"/admin/disputes/{did}/photo", headers={"X-Admin-Key": KEY}).content == JPG
+    # a seller cannot reject, and an empty contest is refused; a real contest goes to Konsyer
+    assert client.post(f"/disputes/{did}/resolve", json={"user_id": 2, "decision": "reject"}).status_code == 403
+    assert client.post(f"/disputes/{did}/contest", json={"user_id": 2, "note": ""}).status_code == 400
+    ok = client.post(f"/disputes/{did}/contest", json={"user_id": 2, "note": "She chose almond shape"})
+    assert ok.status_code == 200 and ok.json()["dispute"]["stage"] == "konsyer"
+    assert client.get(f"/disputes/{did}/photo?user_id=2").status_code == 404
+    listed = client.get("/admin/disputes", headers={"X-Admin-Key": KEY}).json()["disputes"]
+    assert listed[0]["seller_note"] == "She chose almond shape"

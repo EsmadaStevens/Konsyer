@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS disputes(
   verdict TEXT NOT NULL CHECK(verdict IN ('match','mismatch','unclear')), model_verdict TEXT,
   promised TEXT, observed TEXT, differences TEXT, image_quality TEXT, confidence REAL, forced_unclear TEXT, model TEXT,
   status TEXT NOT NULL CHECK(status IN ('open','retry','no_issue','refunded','rejected')),
-  created_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT);
+  created_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT,
+  seller_note TEXT, contested_at TEXT, escalated TEXT, photo BLOB);
 CREATE INDEX IF NOT EXISTS idx_disputes_voucher ON disputes(voucher_id, status);
 CREATE TABLE IF NOT EXISTS lead_feedback(
   user_id INTEGER NOT NULL REFERENCES users(id), lead_key TEXT NOT NULL, lead_name TEXT,
@@ -127,6 +128,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     vcols = {r[1] for r in conn.execute("PRAGMA table_info(vouchers)")}
     if "source" not in vcols:  # where the seller's listing came from: merchant, flyer, screenshot or web_lead
         conn.execute("ALTER TABLE vouchers ADD COLUMN source TEXT")
+    dcols = {r[1] for r in conn.execute("PRAGMA table_info(disputes)")}
+    for col, kind in (("seller_note", "TEXT"), ("contested_at", "TEXT"), ("escalated", "TEXT"), ("photo", "BLOB")):
+        if dcols and col not in dcols:  # older databases: a contest is status 'open' plus contested_at
+            conn.execute(f"ALTER TABLE disputes ADD COLUMN {col} {kind}")
     lcols = {r[1] for r in conn.execute("PRAGMA table_info(listings)")}
     if "cancel_free_hours" not in lcols:  # deposit policy, fixed per listing: free cancellation window
         conn.execute("ALTER TABLE listings ADD COLUMN cancel_free_hours INTEGER NOT NULL DEFAULT 24")

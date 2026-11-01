@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 // Set with: --dart-define=API_BASE=http://localhost:8000
@@ -61,4 +62,13 @@ Future<Map<String, dynamic>> apiUpload(
     ..files.add(http.MultipartFile.fromBytes(field, bytes, filename: filename));
   final streamed = await req.send().timeout(const Duration(seconds: 90));
   return decodeResponse(await http.Response.fromStream(streamed));
+}
+
+/// Raw bytes, for a photo a person must look at before deciding. Never cached by the server.
+Future<Uint8List> apiGetBytes(String path, {Map<String, String>? headers}) async {
+  final r = await http
+      .get(Uri.parse('$apiBase$path'), headers: headers)
+      .timeout(const Duration(seconds: 30));
+  if (r.statusCode != 200) throw ApiError('The photo is no longer available.');
+  return r.bodyBytes;
 }
