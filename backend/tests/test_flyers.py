@@ -222,3 +222,10 @@ def test_draft_endpoints_end_to_end(client, tmp_path, monkeypatch, fake_flyer):
     monkeypatch.setattr(listing_drafts, "chat", model_says(photo_answer()))
     ph = client.post(f"/merchants/{m}/draft-from-photo", data={"user_id": "2"}, files=f)
     assert ph.status_code == 200 and ph.json()["photo_checked"] is True
+
+
+def test_photo_prompt_describes_the_item_only():
+    p = listing_drafts.PHOTO_PROMPT.lower()
+    for word in ("background", "hands", "lighting"):
+        assert word in p
+    assert "ignore everything else" in p
