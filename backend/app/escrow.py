@@ -98,14 +98,19 @@ def _get(conn, user_id, voucher_id):
     return v
 
 
+def _number_source(v):
+    return {"flyer": "poster", "screenshot": "poster", "web_lead": "web"}.get(v["source"])
+
+
 def _must_be_held(v):
     if v["state"] != "held":
         raise EscrowError("conflict", f"This is already {v['state']}. Nothing more can be done.")
 
 
-def check_number(raw, on_file=None) -> dict:
+def check_number(raw, on_file=None, source=None) -> dict:
     """Validate a payout number in code. Returns the normalised number, a 'looks like' network note and a warning
-    when it differs from the number on file (or none is on file). Never trusts text from a listing or the model."""
+    when it differs from the number on file, none is on file, or the number on file came from whoever posted the
+    listing ('poster') or from a web page ('web'). Never trusts text from a listing or the model."""
     digits = parse_zm_phone(raw)
     if not digits or phone_kind(digits) != "mobile":
         raise EscrowError("invalid", "Enter a Zambian mobile number, for example 0977 123 456.")
@@ -117,6 +122,12 @@ def check_number(raw, on_file=None) -> dict:
     elif on_file_digits != digits:
         warning = (f"This is different from the number on the seller's page or listing (+{on_file_digits}). "
                    "Only continue if the seller told you to use this one.")
+    elif source == "poster":
+        warning = ("This number was entered by whoever posted the listing, not by the business. "
+                   "Confirm it with the organiser before you release.")
+    elif source == "web":
+        warning = ("This number came from a web page, which may be out of date. "
+                   "Confirm it with the seller before you release.")
     return {"number": digits, "display": f"+{digits}",
             "network_note": (f"Looks like a {network}-range number (not verified)" if network
                              else "Network not recognised"),
@@ -178,10 +189,11 @@ def hold_booking(conn, user_id, booking_id, listing, slot, amount, label, at=Non
         free_until, forfeit, auto_at = None, 0, None
         expires = _iso(parse_utc(ends) + timedelta(days=UNVERIFIED_EXPIRY_DAYS))
     return conn.execute(
-        "INSERT INTO vouchers(user_id, kind, label, amount, booking_id, listing_id, merchant_id, payee_name, "
+        "INSERT INTO vouchers(user_id, kind, label, amount, booking_id, listing_id, merchant_id, source, payee_name, "
         "payee_phone, payee_verified, starts_at, ends_at, free_cancel_until, forfeit_pct, auto_release_at, "
-        "expires_at, idem_key, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (user_id, "booking", label, amount, booking_id, listing["id"], listing["merchant_id"], listing["name"],
+        "expires_at, idem_key, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (user_id, "booking", label, amount, booking_id, listing["id"], listing["merchant_id"], listing["source"],
+         listing["name"],
          parse_zm_phone(listing["contact_whatsapp"]), int(verified), starts, ends, free_until, forfeit, auto_at,
          expires, f"booking-{booking_id}", _iso(at))).lastrowid
 
@@ -215,8 +227,8 @@ def create_lead_hold(conn, user_id, lead_id, amount, what=None, idem_key=None, t
         except wallet.WalletError as e:
             return {"ok": False, "outcome": "blocked_by_policy", "rule": "insufficient_funds", "message": str(e)}
         vid = conn.execute(
-            "INSERT INTO vouchers(user_id, kind, label, amount, lead_id, payee_name, payee_phone, payee_verified, "
-            "expires_at, idem_key, created_at) VALUES (?,?,?,?,?,?,?,0,?,?,?)",
+            "INSERT INTO vouchers(user_id, kind, label, amount, lead_id, source, payee_name, payee_phone, "
+            "payee_verified, expires_at, idem_key, created_at) VALUES (?,?,?,?,?,'web_lead',?,?,0,?,?,?)",
             (user_id, "lead", label, amount, lead["id"], lead["name"], parse_zm_phone(lead["phone"]),
              _iso(at + timedelta(days=UNVERIFIED_EXPIRY_DAYS)), key, _iso(at))).lastrowid
         _audit(conn, user_id, "voucher_held",
@@ -232,7 +244,7 @@ def payout_check(conn, user_id, voucher_id, payout_number) -> dict:
     _must_be_held(v)
     if v["payee_verified"]:
         raise EscrowError("invalid", "This seller is verified, so Konsyer pays their registered account.")
-    return check_number(payout_number, v["payee_phone"])
+    return check_number(payout_number, v["payee_phone"], _number_source(v))
 
 
 def release(conn, user_id, voucher_id, payout_number=None, confirmed_number=None, accept_warning=False, at=None):
@@ -247,7 +259,7 @@ def release(conn, user_id, voucher_id, payout_number=None, confirmed_number=None
         else:
             if not payout_number:
                 raise EscrowError("invalid", "Enter the seller's mobile-money number first.")
-            chk = check_number(payout_number, v["payee_phone"])
+            chk = check_number(payout_number, v["payee_phone"], _number_source(v))
             if parse_zm_phone(confirmed_number) != chk["number"]:
                 raise EscrowError("confirm", "Please confirm the number shown on screen before releasing.")
             if chk["warning"] and not accept_warning:
@@ -361,6 +373,7 @@ def _view(v, at) -> dict:
     return {"id": v["id"], "kind": v["kind"], "label": v["label"], "state": v["state"],
             "amount": v["amount"], "amount_display": fmt_k(v["amount"]),
             "paid_amount": v["paid_amount"], "refunded_amount": v["refunded_amount"],
+            "source": v["source"], "community": v["source"] in ("flyer", "screenshot"),
             "payee_name": v["payee_name"], "payee_verified": bool(v["payee_verified"]),
             "payee_phone": f"+{v['payee_phone']}" if v["payee_phone"] else None,
             "needs_payout_number": held and not v["payee_verified"],

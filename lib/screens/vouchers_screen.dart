@@ -145,7 +145,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
                 controlAffinity: ListTileControlAffinity.leading,
                 value: accepted,
                 onChanged: (x) => setD(() => accepted = x ?? false),
-                title: const Text('The seller told me to use this number'),
+                title: const Text('I have checked this number with the seller'),
               ),
             ],
             const SizedBox(height: 8),
@@ -219,6 +219,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
     final cs = Theme.of(context).colorScheme;
     final held = v['state'] == 'held';
     final verified = v['payee_verified'] == true;
+    final community = v['community'] == true;
     final canReport = v['can_report'] == true;
     final paid = (v['paid_amount'] as num).toInt();
     final back = (v['refunded_amount'] as num).toInt();
@@ -236,7 +237,9 @@ class _VouchersScreenState extends State<VouchersScreen> {
           Wrap(spacing: 8, children: [
             Chip(label: Text(_stateLabel(v['state'].toString())), visualDensity: VisualDensity.compact),
             Chip(
-              label: Text(verified ? 'Verified seller' : 'Seller not verified'),
+              label: Text(verified
+                  ? 'Verified seller'
+                  : (community ? 'Community listing: posted by a user, not verified' : 'Seller not verified')),
               visualDensity: VisualDensity.compact,
               backgroundColor: verified ? Colors.green.withAlpha(60) : cs.errorContainer.withAlpha(90),
             ),

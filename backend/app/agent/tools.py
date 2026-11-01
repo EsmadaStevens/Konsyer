@@ -7,6 +7,7 @@ import re
 from datetime import timedelta
 
 from .. import contact, policy, wallet
+from .. import leads as leads_mod
 from .. import discovery as discovery_mod
 from ..money import fmt_k
 from ..providers.mock import MockRide
@@ -317,6 +318,7 @@ class Tools:
         self._searches += 1
         try:
             rows, _cached = discovery_mod.find_or_search(self.conn, self.discovery, service, area)
+            rows = leads_mod.visible(self.conn, self.user_id, rows)  # hide leads reported closed
         except Exception:  # a provider must never break the chat
             return {"error": "web discovery is unavailable right now"}
         discovery_mod.remember(self.conn, self.user_id, rows)

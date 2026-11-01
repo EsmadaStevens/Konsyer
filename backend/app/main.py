@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import escrow, executor, flyers, merchants, wallet
+from . import escrow, executor, flyers, leads, merchants, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -70,6 +70,17 @@ class HoldIn(BaseModel):
     amount_ngwee: int
     what: Optional[str] = None
     idempotency_key: Optional[str] = None
+
+
+class LeadContactIn(BaseModel):
+    user_id: int = 1
+    details: str
+
+
+class LeadFeedbackIn(BaseModel):
+    user_id: int = 1
+    status: Optional[str] = None
+    price: Optional[str] = None
 
 
 class PayoutCheckIn(BaseModel):
@@ -146,7 +157,12 @@ def chat(body: ChatIn, conn=Depends(db)):
     except (LLMError, httpx.HTTPError) as e:
         raise HTTPException(status_code=502, detail=f"model unavailable: {e}")
     card = plan_card(conn, r["plan_id"]) if r["plan_id"] else None
-    cards = ([card] if card else []) + [contact_card(c) for c in r.get("contacts", [])]
+    lead_ids = leads.ids_from_trace(r["trace"])
+    if not r.get("contacts"):  # the model may answer from remembered leads without searching again
+        lead_ids += [i for i in leads.mentioned_ids(conn, body.user_id, r["reply"]) if i not in lead_ids]
+    lead_card = leads.card(conn, body.user_id, lead_ids)
+    cards = ([card] if card else []) + ([lead_card] if lead_card else []) + \
+        [contact_card(c) for c in r.get("contacts", [])]
     return {"stub": False, "reply": r["reply"], "cards": cards,
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
 
@@ -348,3 +364,21 @@ def advance_time(body: AdvanceIn, x_admin_key: str = Header(default=""), conn=De
     """DEMO ONLY: move the app's clock forward so a video can show the 24-hour auto-release."""
     _require_admin(x_admin_key)
     return _escrow_call(escrow.advance, conn, body.hours)
+
+
+# ---------- web leads: contact drafts without the agent, and "did they reply?" reports ----------
+def _lead_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except leads.LeadError as e:
+        raise HTTPException(status_code=leads.STATUS.get(e.code, 400), detail=e.message)
+
+
+@app.post("/leads/{lead_id}/contact")
+def lead_contact(lead_id: int, body: LeadContactIn, conn=Depends(db)):
+    return contact_card(_lead_call(leads.draft_contact, conn, body.user_id, lead_id, body.details))
+
+
+@app.post("/leads/{lead_id}/feedback")
+def lead_feedback(lead_id: int, body: LeadFeedbackIn, conn=Depends(db)):
+    return _lead_call(leads.record_feedback, conn, body.user_id, lead_id, body.status, body.price)

@@ -290,7 +290,10 @@ def test_lead_release_requires_confirmed_validated_number(conn):
         escrow.release(conn, 1, vid, "0977123456", "0966000000")  # confirmation does not match
     assert e.value.code == "confirm"
     assert voucher(conn, vid)["state"] == "held"
-    r = escrow.release(conn, 1, vid, "0977 123 456", "+260977123456")  # same as the number on file: no warning
+    with pytest.raises(EscrowError) as e:  # even the number on file needs the acknowledgement: it came from a web page
+        escrow.release(conn, 1, vid, "0977 123 456", "+260977123456")
+    assert e.value.code == "confirm" and "web page" in e.value.message
+    r = escrow.release(conn, 1, vid, "0977 123 456", "+260977123456", accept_warning=True)
     assert r["voucher"]["state"] == "released" and voucher(conn, vid)["payout_ref"].startswith("simpay_")
 
 
@@ -394,3 +397,25 @@ def test_api_advance_time_needs_admin_key(client):
     assert client.post("/admin/advance-time", json={"hours": 25}).status_code == 403
     ok = client.post("/admin/advance-time", json={"hours": 25}, headers={"X-Admin-Key": KEY})
     assert ok.status_code == 200 and ok.json()["offset_hours"] == 25
+
+def test_community_listing_release_always_warns_that_the_poster_entered_the_number(conn):
+    conn.execute("UPDATE listings SET contact_whatsapp='0977123456' WHERE id=5")  # number typed by whoever posted it
+    conn.commit()
+    vid, _ = book(conn, listing_id=5, qty=1)
+    v = voucher(conn, vid)
+    assert v["source"] == "flyer"
+    chk = escrow.payout_check(conn, 1, vid, "0977123456")
+    assert chk["warning"] and "posted the listing" in chk["warning"]
+    with pytest.raises(EscrowError) as e:
+        escrow.release(conn, 1, vid, "0977123456", "0977123456")
+    assert e.value.code == "confirm"
+    r = escrow.release(conn, 1, vid, "0977123456", "0977123456", accept_warning=True)
+    assert r["voucher"]["state"] == "released" and r["voucher"]["community"] is True
+
+
+def test_copied_flyer_with_a_scammers_number_is_flagged_when_it_differs(conn):
+    conn.execute("UPDATE listings SET contact_whatsapp='0977123456' WHERE id=5")
+    conn.commit()
+    vid, _ = book(conn, listing_id=5, qty=1)
+    chk = escrow.payout_check(conn, 1, vid, "0966555444")
+    assert "different" in chk["warning"]

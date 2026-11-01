@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS vouchers(
   label TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount > 0),
   state TEXT NOT NULL DEFAULT 'held' CHECK(state IN ('held','released','refunded','forfeited')),
   booking_id INTEGER REFERENCES bookings(id), listing_id INTEGER REFERENCES listings(id),
-  merchant_id INTEGER REFERENCES merchants(id), lead_id INTEGER,
+  merchant_id INTEGER REFERENCES merchants(id), lead_id INTEGER, source TEXT,
   payee_name TEXT, payee_phone TEXT, payee_verified INTEGER NOT NULL DEFAULT 0,
   starts_at TEXT, ends_at TEXT,
   free_cancel_until TEXT, forfeit_pct INTEGER NOT NULL DEFAULT 0,
@@ -92,6 +92,10 @@ CREATE TABLE IF NOT EXISTS vouchers(
   resolution TEXT, payout_ref TEXT, idem_key TEXT UNIQUE,
   created_at TEXT NOT NULL, resolved_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_vouchers_user ON vouchers(user_id, state);
+CREATE TABLE IF NOT EXISTS lead_feedback(
+  user_id INTEGER NOT NULL REFERENCES users(id), lead_key TEXT NOT NULL, lead_name TEXT,
+  status TEXT CHECK(status IN ('open','no_reply','closed')), price TEXT CHECK(price IN ('matched','differs')),
+  updated_at TEXT NOT NULL, PRIMARY KEY(user_id, lead_key));
 CREATE TABLE IF NOT EXISTS feedback(
   id INTEGER PRIMARY KEY, booking_id INTEGER REFERENCES bookings(id), rating INTEGER, note TEXT);
 """
@@ -109,6 +113,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(merchants)")}
     if "social_url" not in cols:
         conn.execute("ALTER TABLE merchants ADD COLUMN social_url TEXT")
+    vcols = {r[1] for r in conn.execute("PRAGMA table_info(vouchers)")}
+    if "source" not in vcols:  # where the seller's listing came from: merchant, flyer, screenshot or web_lead
+        conn.execute("ALTER TABLE vouchers ADD COLUMN source TEXT")
     lcols = {r[1] for r in conn.execute("PRAGMA table_info(listings)")}
     if "cancel_free_hours" not in lcols:  # deposit policy, fixed per listing: free cancellation window
         conn.execute("ALTER TABLE listings ADD COLUMN cancel_free_hours INTEGER NOT NULL DEFAULT 24")

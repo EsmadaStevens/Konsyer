@@ -18,6 +18,7 @@ class _FlyerScreenState extends State<FlyerScreen> {
   List<Map<String, dynamic>> _tiers = [];
   String _type = 'event';
   bool _alcohol = false;
+  bool _attest = false;
   final _title = TextEditingController();
   final _date = TextEditingController();
   final _time = TextEditingController();
@@ -53,6 +54,7 @@ class _FlyerScreenState extends State<FlyerScreen> {
     final min = d['price_min'];
     setState(() {
       _flyerId = j['flyer_id'] as int;
+      _attest = false;
       _needs = ((d['needs_confirmation'] as List?) ?? []).map((e) => '$e').toList();
       _performers = ((d['performers'] as List?) ?? []).map((e) => '$e').toList();
       _tiers = ((d['prices'] as List?) ?? []).cast<Map<String, dynamic>>();
@@ -176,7 +178,7 @@ class _FlyerScreenState extends State<FlyerScreen> {
             ]),
           ),
         _field(_price, 'Price per person (K)', warn: _needs.contains('price')),
-        _field(_phone, 'Booking phone / WhatsApp',
+        _field(_phone, 'Booking phone / WhatsApp (as printed on the flyer)',
             warn: _needs.contains('contact_or_location')),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -190,9 +192,20 @@ class _FlyerScreenState extends State<FlyerScreen> {
             child: Text(_performers.isEmpty ? 'Lineup not listed' : 'Lineup: ${_performers.join(', ')}'),
           ),
         const SizedBox(height: 8),
-        FilledButton(onPressed: _busy ? null : _confirm, child: Text(_busy ? 'Saving...' : 'Add listing')),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          value: _attest,
+          onChanged: (v) => setState(() => _attest = v ?? false),
+          title: const Text('This flyer is real, and the contact number is the one printed on it.'),
+        ),
+        FilledButton(
+            onPressed: (_busy || !_attest) ? null : _confirm, child: Text(_busy ? 'Saving...' : 'Add listing')),
         const SizedBox(height: 4),
-        const Text('Listings from flyers are unverified, so paying for them always needs your approval.',
+        const Text(
+            'This will appear as a community listing: posted by you, not verified, and not paid out to you. '
+            'People who book it have their money held until they confirm it happened. '
+            'If this is your own business or event, register it under Businesses to be verified and shown first.',
             style: TextStyle(fontSize: 12)),
       ]);
 
