@@ -20,6 +20,8 @@ class ConciergeApp extends StatelessWidget {
               seedColor: const Color(0xFFD4AF37), brightness: Brightness.dark),
         ),
         home: const ChatScreen(),
+        // The admin console is a separate address (open /#/admin in its own tab), not part of the customer app.
+        routes: {'/admin': (_) => const AdminScreen()},
       );
 }
 
@@ -91,12 +93,6 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: const Icon(Icons.timeline_outlined),
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
-          ),
-          IconButton(
-            tooltip: 'Admin',
-            icon: const Icon(Icons.admin_panel_settings_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const AdminScreen())),
           ),
           IconButton(
             tooltip: 'Wallet',

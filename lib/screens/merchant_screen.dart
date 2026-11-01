@@ -438,6 +438,68 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
     }
   }
 
+  static const _maxSlots = 20;
+
+  String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  /// Copies one time onto the following days or weeks so a seller does not retype it. Every copy stays editable.
+  Future<void> _repeat(int i) async {
+    final src = _slots[i];
+    final base = DateTime.tryParse(src.date.text.trim());
+    if (base == null || src.start.text.trim().isEmpty) {
+      return _toast('Fill in this time\'s date (YYYY-MM-DD) and start first, then repeat it.');
+    }
+    final room = _maxSlots - _slots.length;
+    if (room <= 0) return _toast('You can add up to $_maxSlots times.');
+    final count = TextEditingController(text: room < 6 ? '$room' : '6');
+    var weekly = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('Repeat this time'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            RadioGroup<bool>(
+              groupValue: weekly,
+              onChanged: (v) => setD(() => weekly = v ?? false),
+              child: const Column(children: [
+                RadioListTile<bool>(contentPadding: EdgeInsets.zero, value: false, title: Text('Every day')),
+                RadioListTile<bool>(contentPadding: EdgeInsets.zero, value: true, title: Text('Every week')),
+              ]),
+            ),
+            TextField(
+                controller: count,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                    labelText: 'How many more ${weekly ? 'weeks' : 'days'}? (up to $room)',
+                    border: const OutlineInputBorder())),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add times')),
+          ],
+        ),
+      ),
+    );
+    final n = int.tryParse(count.text.trim()) ?? 0;
+    count.dispose();
+    if (ok != true || n < 1) return;
+    final add = n > room ? room : n;
+    setState(() {
+      var at = i;
+      for (var k = 1; k <= add; k++) {
+        final f = _SlotFields();
+        f.date.text = _ymd(base.add(Duration(days: (weekly ? 7 : 1) * k)));
+        f.start.text = src.start.text;
+        f.end.text = src.end.text;
+        f.cap.text = src.cap.text;
+        _slots.insert(++at, f);
+      }
+    });
+    _toast('Added $add times. Change or remove any of them.');
+  }
+
   Widget _slotRow(int i) {
     final s = _slots[i];
     return Card(
@@ -447,6 +509,8 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
         child: Column(children: [
           Row(children: [
             Expanded(child: Text('Time ${i + 1}', style: Theme.of(context).textTheme.titleSmall)),
+            TextButton.icon(
+                onPressed: () => _repeat(i), icon: const Icon(Icons.repeat, size: 18), label: const Text('Repeat')),
             if (_slots.length > 1)
               IconButton(
                   tooltip: 'Remove',
@@ -567,7 +631,7 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
         ),
         const SizedBox(height: 8),
         for (var i = 0; i < _slots.length; i++) _slotRow(i),
-        if (_slots.length < 20)
+        if (_slots.length < _maxSlots)
           TextButton.icon(
               onPressed: () => setState(() => _slots.add(_SlotFields())),
               icon: const Icon(Icons.add),
