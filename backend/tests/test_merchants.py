@@ -234,3 +234,11 @@ def test_old_database_without_social_url_is_upgraded(tmp_path):
     assert "social_url" in {r[1] for r in c.execute("PRAGMA table_info(merchants)")}
     assert c.execute("SELECT name FROM merchants").fetchone()["name"] == "Old Co"
     init_db(c)                                               # running it again is harmless
+
+def test_listing_results_carry_the_business_name(conn):
+    conn.execute("INSERT INTO merchants(id, name, area, verified) VALUES (9, 'Sample nails', 'Kabulonga', 1)")
+    conn.execute("UPDATE listings SET merchant_id=9 WHERE name='Sample Nail Bar'")
+    conn.commit()
+    t = Tools(conn, 1, TODAY)
+    found = t.search_listings(query="nail bar")["listings"]
+    assert found and found[0]["business"] == "Sample nails"

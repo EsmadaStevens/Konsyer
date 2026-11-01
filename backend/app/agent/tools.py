@@ -116,7 +116,10 @@ class Tools:
 
     def _listing_dict(self, r, full=False):
         slots = self._slots(r["id"])
-        d = {"listing_id": r["id"], "name": r["name"], "type": r["type"], "area": r["area"],
+        m = self.conn.execute("SELECT name FROM merchants WHERE id=?", (r["merchant_id"],)).fetchone() \
+            if r["merchant_id"] else None
+        d = {"listing_id": r["id"], "name": r["name"], "business": m["name"] if m else None,
+             "type": r["type"], "area": r["area"],
              "price_per_person_ngwee": r["price"], "price_display": fmt_k(r["price"]) if r["price"] is not None else None,
              "serves_alcohol": bool(r["serves_alcohol"]), "status": r["status"], "trust_score": r["trust_score"],
              "verified": r["status"] == "verified", "source": r["source"],
