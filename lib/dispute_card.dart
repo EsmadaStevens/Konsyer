@@ -1,10 +1,30 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 /// Shows what the photo check found. The model only RECOMMENDS: a person (the business or Konsyer) decides.
 /// Used on the customer's Held payments, the business dashboard and the admin console.
 class DisputeCard extends StatelessWidget {
   final Map<String, dynamic> d;
-  const DisputeCard(this.d, {super.key});
+  /// Set where a person must decide: loads the photo, which exists only while the review is open.
+  final Future<Uint8List> Function()? loadPhoto;
+  const DisputeCard(this.d, {super.key, this.loadPhoto});
+
+  Future<void> _showPhoto(BuildContext context) async {
+    try {
+      final bytes = await loadPhoto!();
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Photo from the customer'),
+          content: SingleChildScrollView(child: Image.memory(bytes)),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Close'))],
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,12 +79,30 @@ class DisputeCard extends StatelessWidget {
             padding: const EdgeInsets.only(top: 6),
             child: Text('Customer note: ${d['note']}', style: t.bodySmall),
           ),
+        if ((d['seller_note'] ?? '').toString().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('Seller\'s reply: ${d['seller_note']}', style: t.bodySmall),
+          ),
+        if (d['escalated'] == 'no_reply')
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('The seller did not reply in time, so this came to Konsyer.', style: t.bodySmall),
+          ),
+        if (loadPhoto != null && d['has_photo'] == true)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+                onPressed: () => _showPhoto(context),
+                icon: const Icon(Icons.photo_outlined),
+                label: const Text('View the customer\'s photo')),
+          ),
         if ((d['message'] ?? '').toString().isNotEmpty && status.isNotEmpty) ...[
           const SizedBox(height: 6),
           Text(d['message'].toString(), style: t.bodySmall),
         ],
         const SizedBox(height: 6),
-        Text('A model\'s recommendation only. A person decides; the photo is not stored.', style: t.labelSmall),
+        Text('A model\'s recommendation only. A person decides. The photo is kept only while a review is open, then deleted.', style: t.labelSmall),
       ]),
     );
   }

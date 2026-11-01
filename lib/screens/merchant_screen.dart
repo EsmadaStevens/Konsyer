@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../api.dart';
 import '../dispute_card.dart';
 
@@ -101,26 +102,59 @@ class _MerchantScreenState extends State<MerchantScreen> {
     }
   }
 
-  Future<void> _resolve(Map<String, dynamic> d, String decision) async {
-    final refund = decision == 'refund';
+  Future<void> _resolve(Map<String, dynamic> d) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(refund ? 'Refund the customer?' : 'Keep the payment?'),
-        content: Text(refund
-            ? 'The held money goes back to the customer in full.'
-            : 'The claim is rejected. The payment continues as normal and is released after the usual wait.'),
+        title: const Text('Refund the customer?'),
+        content: const Text('The held money goes back to the customer in full.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(refund ? 'Refund' : 'Keep payment')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Refund')),
         ],
       ),
     );
     if (ok != true) return;
     setState(() => busy = true);
     try {
-      await apiPost('/disputes/${d['id']}/resolve', {'user_id': userId, 'decision': decision});
-      _toast(refund ? 'Refunded. The customer got their money back.' : 'Claim rejected. The payment continues.');
+      await apiPost('/disputes/${d['id']}/resolve', {'user_id': userId, 'decision': 'refund'});
+      _toast('Refunded. The customer got their money back.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  /// You cannot reject a claim against yourself. Contesting sends it to Konsyer with your reason.
+  Future<void> _contest(Map<String, dynamic> d) async {
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Contest this claim?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Konsyer will review it and decide. The money stays held until then. Say briefly why you disagree.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: note,
+            maxLength: 500,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Your reason', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Send to Konsyer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => busy = true);
+    try {
+      await apiPost('/disputes/${d['id']}/contest', {'user_id': userId, 'note': note.text.trim()});
+      _toast('Sent to Konsyer. The money stays held until they decide.');
       await _load();
     } catch (e) {
       _toast('$e');
@@ -164,17 +198,21 @@ class _MerchantScreenState extends State<MerchantScreen> {
             ),
           if (held && v['can_confirm'] != true)
             Text('You can confirm once the booking time has started.', style: t.labelSmall),
-          if (dispute != null) DisputeCard(dispute),
+          if (dispute != null)
+            DisputeCard(dispute,
+                loadPhoto: v['can_resolve'] == true
+                    ? () => apiGetBytes('/disputes/${dispute['id']}/photo?user_id=$userId')
+                    : null),
           if (v['can_resolve'] == true && dispute != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Wrap(spacing: 8, runSpacing: 8, children: [
                 FilledButton(
-                    onPressed: busy ? null : () => _resolve(dispute, 'refund'),
+                    onPressed: busy ? null : () => _resolve(dispute),
                     child: const Text('Refund customer')),
                 OutlinedButton(
-                    onPressed: busy ? null : () => _resolve(dispute, 'reject'),
-                    child: const Text('Keep payment')),
+                    onPressed: busy ? null : () => _contest(dispute),
+                    child: const Text('Contest')),
               ]),
             ),
         ]),
@@ -311,6 +349,9 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
   final _area = TextEditingController();
   final _price = TextEditingController();
   final List<_SlotFields> _slots = [_SlotFields()];
+  List<String> _tags = [];
+  List<String> _check = [];
+  String? _advice;
 
   @override
   void initState() {
@@ -320,6 +361,41 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
 
   void _toast(String m) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  /// The model only DRAFTS the form from a picture. You check and edit every field, then submit.
+  /// Only a registered business can do this, and nothing is visible to customers until Konsyer verifies you.
+  Future<void> _draft(String kind) async {
+    try {
+      final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 2400, imageQuality: 90);
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      setState(() => _busy = true);
+      final j = await apiUpload('/merchants/${widget.merchant['merchant_id']}/draft-from-$kind',
+          {'user_id': '$userId'}, bytes, x.name);
+      final price = j['price_ngwee'];
+      setState(() {
+        _type = (j['listing_type'] ?? _type).toString();
+        _title.text = (j['title'] ?? '').toString();
+        _desc.text = (j['description'] ?? '').toString();
+        _alcohol = j['serves_alcohol'] == true;
+        _tags = ((j['tags'] as List?) ?? []).map((e) => '$e').toList();
+        if (price is int) {
+          _price.text = price % 100 == 0 ? '${price ~/ 100}' : (price / 100).toStringAsFixed(2);
+        }
+        final d = (j['date'] ?? '').toString();
+        final st = (j['start_time'] ?? '').toString();
+        if (d.isNotEmpty) _slots.first.date.text = d;
+        if (st.isNotEmpty) _slots.first.start.text = st;
+        _check = ((j['needs_confirmation'] as List?) ?? []).map((e) => '$e').toList();
+        _advice = j['advice']?.toString();
+      });
+      _toast('Drafted from your ${kind == 'flyer' ? 'flyer' : 'photo'}. Check every field before you submit.');
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -350,7 +426,7 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
         'area': _orNull(_area.text),
         'price_ngwee': (price * 100).round(),
         'serves_alcohol': _alcohol,
-        'tags': <String>[],
+        'tags': _tags,
         'slots': slots,
       });
       _toast(j['message']?.toString() ?? 'Submitted.');
@@ -415,6 +491,40 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Add a listing')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Fill it in from a picture', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              Text('A Meta vision model drafts the form. You check and edit it, and Konsyer verifies it before customers see it.',
+                  style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _draft('flyer'),
+                    icon: const Icon(Icons.description_outlined),
+                    label: const Text('From a flyer')),
+                OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _draft('photo'),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('From a product photo')),
+              ]),
+              if (_check.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('Please check: ${_check.join(', ')}.', style: Theme.of(context).textTheme.bodySmall),
+                ),
+              if (_advice != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_advice!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+                ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
         DropdownButtonFormField<String>(
           initialValue: _type,
           decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
@@ -433,8 +543,11 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
         const SizedBox(height: 12),
         TextField(
             controller: _desc,
-            maxLines: 2,
-            decoration: const InputDecoration(labelText: 'Description (optional)', border: OutlineInputBorder())),
+            maxLines: 3,
+            decoration: const InputDecoration(
+                labelText: 'Description',
+                helperText: 'Be specific (colour, shape or size, finish): customers are protected by a photo check.',
+                border: OutlineInputBorder())),
         const SizedBox(height: 12),
         TextField(
             controller: _area,

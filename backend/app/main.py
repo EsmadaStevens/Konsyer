@@ -6,12 +6,12 @@ import uuid
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import activity, disputes, escrow, executor, flyers, leads, merchants, wallet
+from . import activity, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -51,21 +51,6 @@ class TopupIn(BaseModel):
     idempotency_key: Optional[str] = None
 
 
-class FlyerConfirmIn(BaseModel):
-    user_id: int = 1
-    title: str
-    listing_type: str
-    date: Optional[str] = None
-    start_time: Optional[str] = None
-    venue: Optional[str] = None
-    area: Optional[str] = None
-    price_ngwee: Optional[int] = None
-    serves_alcohol: bool = False
-    contact_phone: Optional[str] = None
-    performers: list[str] = []
-    availability_text: Optional[str] = None
-
-
 class HoldIn(BaseModel):
     user_id: int = 1
     amount_ngwee: int
@@ -91,6 +76,11 @@ class ResolveIn(BaseModel):
 
 class AdminResolveIn(BaseModel):
     decision: str
+
+
+class ContestIn(BaseModel):
+    user_id: int = 1
+    note: str
 
 
 class PayoutCheckIn(BaseModel):
@@ -243,24 +233,24 @@ def get_plan(plan_id: int, user_id: int = 1, conn=Depends(db)):
     return {"card": plan_card(conn, plan_id)}
 
 
-# ---------- flyer / screenshot ingest ----------
-def _flyer_call(fn, *args):
+# ---------- listing drafts from a picture: registered business owners only ----------
+def _draft_call(fn, *args):
     try:
         return fn(*args)
     except flyers.FlyerError as e:
         raise HTTPException(status_code=flyers.STATUS.get(e.code, 400), detail=e.message)
 
 
-@app.post("/flyers")
-def upload_flyer(image: UploadFile = File(...), user_id: int = Form(1), kind: str = Form("flyer"),
-                 conn=Depends(db)):
+@app.post("/merchants/{merchant_id}/draft-from-flyer")
+def draft_from_flyer(merchant_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
     data = image.file.read(flyers.MAX_BYTES + 1)  # never read more than the cap plus one byte
-    return _flyer_call(flyers.create_draft, conn, user_id, kind, data, lusaka_today())
+    return _draft_call(listing_drafts.from_flyer, conn, user_id, merchant_id, data, lusaka_today())
 
 
-@app.post("/flyers/{flyer_id}/confirm")
-def confirm_flyer(flyer_id: int, body: FlyerConfirmIn, conn=Depends(db)):
-    return _flyer_call(flyers.confirm, conn, body.user_id, flyer_id, body.model_dump(), lusaka_today())
+@app.post("/merchants/{merchant_id}/draft-from-photo")
+def draft_from_photo(merchant_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
+    data = image.file.read(listing_drafts.MAX_PHOTO_BYTES + 1)
+    return _draft_call(listing_drafts.from_photo, conn, user_id, merchant_id, data)
 
 
 # ---------- merchants (signup is open; verification is admin-only) ----------
@@ -415,6 +405,31 @@ def dispute_voucher(voucher_id: int, photo: UploadFile = File(...), note: str = 
 @app.post("/disputes/{dispute_id}/resolve")
 def resolve_dispute_as_business(dispute_id: int, body: ResolveIn, conn=Depends(db)):
     return _dispute_call(disputes.resolve, conn, body.user_id, dispute_id, body.decision)
+
+
+@app.post("/disputes/{dispute_id}/contest")
+def contest_dispute(dispute_id: int, body: ContestIn, conn=Depends(db)):
+    """The seller disagrees: the case goes to Konsyer. The seller cannot reject a claim themselves."""
+    return _dispute_call(disputes.contest, conn, body.user_id, dispute_id, body.note)
+
+
+_PHOTO_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _photo_response(data: bytes):
+    return Response(content=data, media_type=_PHOTO_TYPES.get(disputes.detect_image(data), "application/octet-stream"),
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/disputes/{dispute_id}/photo")
+def dispute_photo_for_seller(dispute_id: int, user_id: int = 1, conn=Depends(db)):
+    return _photo_response(_dispute_call(disputes.photo, conn, user_id, dispute_id))
+
+
+@app.get("/admin/disputes/{dispute_id}/photo")
+def dispute_photo_for_admin(dispute_id: int, x_admin_key: str = Header(default=""), conn=Depends(db)):
+    _require_admin(x_admin_key)
+    return _photo_response(_dispute_call(disputes.photo, conn, 0, dispute_id, True))
 
 
 @app.get("/admin/disputes")

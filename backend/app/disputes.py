@@ -5,8 +5,11 @@ was promised, what it sees, the differences). Plain code then:
   * validates every field, and forces 'unclear' for a poor or irrelevant photo or a low-confidence answer;
   * treats the verdict as a RECOMMENDATION only. The model never refunds anything;
   * pauses the automatic release of the money while a review is open;
-  * lets only a person decide: the verified business owner or the Konsyer admin (refund or reject).
-Photos are processed in memory and are NOT stored; only the verdict JSON is kept.
+  * lets only people decide. The seller gets SELLER_REPLY_HOURS to accept (refund) or contest with a note; a contest,
+    or silence, sends it to Konsyer, the neutral party. Only Konsyer can reject a claim, so a seller who is clearly
+    wrong cannot trap the customer by refusing.
+A photo is kept ONLY while a review is open, so the person deciding can see it, and is deleted when it is resolved.
+Photos for checks that find no problem are never stored. Only the verdict JSON is kept afterwards.
 Text in the photo, the listing and the customer's note is data: the prompt says never to follow it, and the model's
 answer can only fill the fixed fields below.
 """
@@ -21,11 +24,14 @@ from . import escrow
 from .contact import one_line
 from .flyers import detect_image
 from .llm import LLMError, as_job, chat
+from .specificity import is_specific
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_ATTEMPTS = 3
 UNCLEAR_BEFORE_HUMAN = 2
 MIN_CONFIDENCE = 0.6
+SELLER_REPLY_HOURS = 48  # then it goes to Konsyer without waiting any longer
+MIN_NOTE = 3
 RELEASE_GRACE_MINUTES = 30  # after a rejection, a short pause before an overdue auto-release happens
 VERDICTS = ("match", "mismatch", "unclear")
 QUALITIES = ("good", "poor", "not_relevant")
@@ -159,26 +165,45 @@ def _model_name():
 
 
 # ---------- reading ----------
-def _message(status, verdict):
+def _message(status, verdict, stage):
+    if status == "open":
+        if stage == "konsyer":
+            return ("Konsyer is reviewing this. A person will decide, and your money stays held until then.")
+        flagged = "does not seem to match the listing" if verdict == "mismatch" else "could not be checked automatically"
+        return (f"The photo {flagged}. The seller has {SELLER_REPLY_HOURS} hours to refund you or contest. "
+                "If they contest or do not reply, Konsyer reviews it. Your money stays held meanwhile.")
     return {
-        "open": ("The photo does not seem to match the listing. A person (the business or Konsyer) will review it "
-                 "before any refund. Your money stays held meanwhile.") if verdict == "mismatch" else
-                "The photo was still unclear, so a person will review it. Your money stays held meanwhile.",
         "no_issue": "The photo looks like what was listed, so no review was opened. If something else is wrong, "
                     "use Report a problem.",
         "retry": "I could not tell from this photo. Try a clearer, well-lit photo of the result.",
         "refunded": "Reviewed by a person: you were refunded.",
-        "rejected": "Reviewed by a person: the claim was not accepted. The money continues as normal.",
+        "rejected": "Reviewed by Konsyer: the claim was not accepted. The money continues as normal.",
     }[status]
 
 
+def _stage(d):
+    """open + not contested = waiting for the seller; open + contested (or overdue) = with Konsyer."""
+    if d["status"] != "open":
+        return None
+    return "konsyer" if d["contested_at"] else "seller"
+
+
+def _reply_by(d):
+    if d["status"] != "open" or d["contested_at"]:
+        return None
+    return escrow._iso(escrow.parse_utc(d["created_at"]) + timedelta(hours=SELLER_REPLY_HOURS))
+
+
 def _view(d) -> dict:
+    stage = _stage(d)
     return {"id": d["id"], "voucher_id": d["voucher_id"], "attempt": d["attempt"], "status": d["status"],
+            "stage": stage, "reply_by": _reply_by(d), "seller_note": d["seller_note"], "escalated": d["escalated"],
             "verdict": d["verdict"], "model_verdict": d["model_verdict"], "promised": d["promised"],
             "observed": d["observed"], "differences": json.loads(d["differences"] or "[]"),
             "image_quality": d["image_quality"], "confidence": d["confidence"], "adjusted": d["forced_unclear"],
-            "note": d["note"], "model": d["model"], "message": _message(d["status"], d["verdict"]),
+            "note": d["note"], "model": d["model"], "message": _message(d["status"], d["verdict"], stage),
             "needs_human": d["status"] == "open", "can_retry": d["status"] == "retry",
+            "has_photo": d["status"] == "open" and bool(d["photo"]),
             "resolved_by": d["resolved_by"], "recommendation_only": True, "created_at": d["created_at"]}
 
 
@@ -191,14 +216,29 @@ def _listing_text(conn, v):
     return f"{l['name']}. {l['description']}"
 
 
+def escalate_overdue(conn, at=None) -> int:
+    """A seller who has not replied within SELLER_REPLY_HOURS loses the right to hold the case up: it goes to
+    Konsyer. Nothing is refunded or released by this; it only changes who has to act next."""
+    at = at or escrow.now(conn)
+    cutoff = escrow._iso(at - timedelta(hours=SELLER_REPLY_HOURS))
+    with escrow._transaction(conn):
+        n = conn.execute("UPDATE disputes SET contested_at=?, escalated='no_reply' "
+                         "WHERE status='open' AND contested_at IS NULL AND created_at <= ?",
+                         (escrow._iso(at), cutoff)).rowcount
+    return n
+
+
 def attach(conn, views, merchant=False) -> list:
     """Add the latest dispute (if any) and what the user may do next to each voucher view."""
+    escalate_overdue(conn)
     for v in views:
         rows = conn.execute("SELECT * FROM disputes WHERE voucher_id=? ORDER BY id DESC", (v["id"],)).fetchall()
         last = rows[0] if rows else None
         v["dispute"] = _view(last) if last else None
         if merchant:
-            v["can_resolve"] = bool(last and last["status"] == "open" and v["state"] == "held")
+            waiting = bool(last and last["status"] == "open" and not last["contested_at"] and v["state"] == "held")
+            v["can_resolve"] = waiting   # the seller may refund...
+            v["can_contest"] = waiting   # ...or contest, which sends it to Konsyer
             continue
         vk = conn.execute("SELECT kind, listing_id FROM vouchers WHERE id=?", (v["id"],)).fetchone()
         v["can_dispute"] = bool(v["state"] == "held" and vk["kind"] == "booking" and vk["listing_id"]
@@ -229,9 +269,17 @@ def open_dispute(conn, user_id, voucher_id, note, image: bytes, assess_fn: Optio
     if len(prev) >= MAX_ATTEMPTS:
         raise DisputeError("conflict", "The maximum number of photo checks was reached. Use Report a problem instead.")
 
-    result = (assess_fn or assess)(listing_text, note, image)  # slow network call: no database lock is held here
+    desc = conn.execute("SELECT description FROM listings WHERE id=?", (v["listing_id"],)).fetchone()["description"]
+    vague = not is_specific(desc)
+    if vague:
+        # a vague promise gives the model nothing to compare: do not guess, send it straight to a person
+        result = {"model_verdict": "unclear", "verdict": "unclear", "image_quality": "good", "confidence": 0.0,
+                  "promised": one_line(desc, 200), "observed": "", "differences": [],
+                  "adjusted": "the listing description is too vague for an automatic photo check"}
+    else:
+        result = (assess_fn or assess)(listing_text, note, image)  # slow call: no database lock is held here
     unclear_so_far = sum(1 for p in prev if p["status"] == "retry") + (1 if result["verdict"] == "unclear" else 0)
-    if result["verdict"] == "mismatch":
+    if vague or result["verdict"] == "mismatch":
         status = "open"
     elif result["verdict"] == "match":
         status = "no_issue"
@@ -244,11 +292,13 @@ def open_dispute(conn, user_id, voucher_id, note, image: bytes, assess_fn: Optio
             raise DisputeError("conflict", "This payment was settled while the photo was being checked.")
         did = conn.execute(
             "INSERT INTO disputes(voucher_id, user_id, attempt, note, verdict, model_verdict, promised, observed, "
-            "differences, image_quality, confidence, forced_unclear, model, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "differences, image_quality, confidence, forced_unclear, model, status, created_at, photo) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (voucher_id, user_id, len(prev) + 1, note, result["verdict"], result["model_verdict"], result["promised"],
              result["observed"], json.dumps(result["differences"], ensure_ascii=False), result["image_quality"],
-             result["confidence"], result["adjusted"], _model_name(), status, escrow._iso(at))).lastrowid
+             result["confidence"], result["adjusted"], "none (vague listing)" if vague else _model_name(),
+             status, escrow._iso(at),
+             image if status == "open" else None)).lastrowid  # kept only while a person must look at it
         conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
                      (user_id, "dispute_assessed",
                       f"Photo check for '{v['label']}': {result['verdict']} (status {status}). This is a "
@@ -266,19 +316,51 @@ def _authorized(conn, resolver_id, v, admin) -> bool:
     return bool(m and v["payee_verified"] and m["owner_user_id"] == resolver_id)
 
 
-def resolve(conn, resolver_id, dispute_id, decision, admin=False, at=None) -> dict:
-    """The verified business owner or the admin decides. 'refund' returns the held money; 'reject' keeps it held and
-    resumes the normal timer (with a short grace so the seller is not paid out in the same second a claim is rejected)."""
-    if decision not in ("refund", "reject"):
-        raise DisputeError("invalid", "Decision must be 'refund' or 'reject'.")
+def _load(conn, resolver_id, dispute_id, admin):
+    d = conn.execute("SELECT * FROM disputes WHERE id=?", (dispute_id,)).fetchone()
+    v = conn.execute("SELECT * FROM vouchers WHERE id=?", (d["voucher_id"],)).fetchone() if d else None
+    if d is None or v is None or not _authorized(conn, resolver_id, v, admin):
+        raise DisputeError("not_found", "That review was not found.")
+    return d, v
+
+
+def contest(conn, resolver_id, dispute_id, note, at=None) -> dict:
+    """The seller disagrees. A short reason is required, and the case goes to Konsyer. The seller cannot reject it."""
+    note = one_line(note, 500)
+    if len(note) < MIN_NOTE:
+        raise DisputeError("invalid", "Please say briefly why you disagree.")
     at = at or escrow.now(conn)
     with escrow._transaction(conn):
-        d = conn.execute("SELECT * FROM disputes WHERE id=?", (dispute_id,)).fetchone()
-        v = conn.execute("SELECT * FROM vouchers WHERE id=?", (d["voucher_id"],)).fetchone() if d else None
-        if d is None or v is None or not _authorized(conn, resolver_id, v, admin):
-            raise DisputeError("not_found", "That review was not found.")
+        d, v = _load(conn, resolver_id, dispute_id, False)
+        if d["status"] != "open" or d["contested_at"]:
+            raise DisputeError("conflict", "This review is no longer waiting for the seller.")
+        if v["state"] != "held":
+            raise DisputeError("conflict", f"The money is already {v['state']}.")
+        conn.execute("UPDATE disputes SET seller_note=?, contested_at=?, escalated='contested' WHERE id=?",
+                     (note, escrow._iso(at), dispute_id))
+        conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                     (v["user_id"], "dispute_contested",
+                      f"The seller contested the photo check for '{v['label']}'. Konsyer will decide.",
+                      "seller_cannot_self_judge"))
+        row = conn.execute("SELECT * FROM disputes WHERE id=?", (dispute_id,)).fetchone()
+    return {"ok": True, "dispute": _view(row)}
+
+
+def resolve(conn, resolver_id, dispute_id, decision, admin=False, at=None) -> dict:
+    """'refund' returns the held money. 'reject' keeps it held and resumes the normal timer (after a short pause).
+    The seller may only refund (while the case waits for them); only Konsyer can reject, so a seller cannot be
+    the judge of a claim against themselves."""
+    if decision not in ("refund", "reject"):
+        raise DisputeError("invalid", "Decision must be 'refund' or 'reject'.")
+    if decision == "reject" and not admin:
+        raise DisputeError("forbidden", "Only Konsyer can reject a claim. Use Contest to send it to Konsyer.")
+    at = at or escrow.now(conn)
+    with escrow._transaction(conn):
+        d, v = _load(conn, resolver_id, dispute_id, admin)
         if d["status"] != "open":
             raise DisputeError("conflict", f"This review is already {d['status']}.")
+        if not admin and d["contested_at"]:
+            raise DisputeError("conflict", "This case is with Konsyer now.")
         if v["state"] != "held":
             raise DisputeError("conflict", f"The money is already {v['state']}.")
         who = "admin" if admin else f"merchant:{v['merchant_id']}"
@@ -291,8 +373,8 @@ def resolve(conn, resolver_id, dispute_id, decision, admin=False, at=None) -> di
                 grace = escrow._iso(at + timedelta(minutes=RELEASE_GRACE_MINUTES))
                 conn.execute("UPDATE vouchers SET auto_release_at=? WHERE id=? AND auto_release_at<?",
                              (grace, v["id"], grace))
-        conn.execute("UPDATE disputes SET status=?, resolved_at=?, resolved_by=? WHERE id=?",
-                     (status, escrow._iso(at), who, dispute_id))
+        conn.execute("UPDATE disputes SET status=?, resolved_at=?, resolved_by=?, photo=NULL WHERE id=?",
+                     (status, escrow._iso(at), who, dispute_id))  # the photo is deleted once a person has decided
         conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
                      (v["user_id"], f"dispute_{status}",
                       f"A person ({who}) reviewed the photo check for '{v['label']}': {decision}.", "human_decides"))
@@ -300,13 +382,24 @@ def resolve(conn, resolver_id, dispute_id, decision, admin=False, at=None) -> di
     return {"ok": True, "dispute": _view(row)}
 
 
+def photo(conn, resolver_id, dispute_id, admin=False):
+    """The photo, only for the person who has to decide (the seller while it waits for them, or the admin), and
+    only while the review is open."""
+    d, _ = _load(conn, resolver_id, dispute_id, admin)
+    if d["status"] != "open" or not d["photo"] or (not admin and d["contested_at"]):
+        raise DisputeError("not_found", "There is no photo to show for this review.")
+    return bytes(d["photo"])
+
+
 def list_open(conn) -> list:
-    """For the admin: reviews waiting for a person, with what they are about."""
+    """For the admin: reviews waiting for a person. Cases the seller contested or ignored come first."""
+    escalate_overdue(conn)
     out = []
     rows = conn.execute(
         "SELECT d.*, v.label AS v_label, v.amount AS v_amount, v.payee_name AS v_payee, v.payee_verified AS v_ver "
         "FROM disputes d JOIN vouchers v ON v.id=d.voucher_id "
-        "WHERE d.status='open' AND v.state='held' ORDER BY d.id").fetchall()
+        "WHERE d.status='open' AND v.state='held' "
+        "ORDER BY (d.contested_at IS NULL), d.id").fetchall()
     for r in rows:
         item = _view(r)
         item.update(label=r["v_label"], amount=r["v_amount"], payee_name=r["v_payee"],

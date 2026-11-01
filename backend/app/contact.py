@@ -68,18 +68,40 @@ def platform_of(url):
     return "website"
 
 
+_GREETING = re.compile(r"^\s*(hi|hello|hey)\b[\s,!.:-]*", re.I)
+_THANKS = re.compile(r"[\s,;.!-]*(thanks|thank you)[\s.!]*$", re.I)
+_FIRST_PERSON = re.compile(r"^(i\W?d|i would|i want|i need|i am|i'm|we )", re.I)
+
+
+def _what(details):
+    """The user's request as one clean phrase: no greeting or sign-off (the template adds its own), no links."""
+    t = clean_details(details)
+    t = _GREETING.sub("", t)
+    t = _THANKS.sub("", t).strip(" ,;:-")
+    return t
+
+
 def build_message(name, details):
-    what = clean_details(details) or "your services"
-    return (f"Hello {one_line(name, 60)}, I found you through Konsyer, a Lusaka booking assistant. "
-            f"I'm looking for: {what}. Could you share your price and availability? Thank you.")
+    """Built by code from a template. The user's request is data inside it, never instructions."""
+    what = _what(details)
+    intro = (f"Hello {one_line(name, 60)}, I found you through Konsyer, an app that helps people in Zambia find "
+             "and book local services.")
+    if not what:
+        ask = "I'm interested in your services."
+    elif _FIRST_PERSON.match(what):
+        ask = what.rstrip(".!") + "."
+    else:
+        ask = f"I'm looking for: {what.rstrip('.!')}."
+    return f"{intro} {ask} Could you share your price and availability? Thank you."
 
 
 def build_invite(name):
     """Message inviting an outside business to register on Konsyer. Built by code from a template (no model text)."""
-    return (f"Hello {one_line(name, 60)}, I found you through Konsyer, a Lusaka booking assistant (an early demo: no real "
-            "payments yet). Konsyer lets businesses register, add real times and prices, and get verified. Customers "
-            "can then book with a deposit that is held until the service is delivered. Would you be interested in being "
-            "listed? Thank you.")
+    return (f"Hello {one_line(name, 60)}, I found you through Konsyer, an app that helps people in Zambia find, book "
+            "and safely pay for local services (an early demo: no real payments yet). Businesses can register, add "
+            "real times and prices, and get verified. Customers then book with the money held in escrow until the "
+            "service is delivered, so you are paid for serious bookings. Would you be interested in being listed? "
+            "Thank you.")
 
 
 def whatsapp_link(digits, text):

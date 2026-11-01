@@ -316,6 +316,10 @@ def merchant_confirm(conn, owner_user_id, voucher_id, at=None):
         v = _merchant_voucher(conn, owner_user_id, voucher_id)
         if v["starts_at"] and _iso(at) < v["starts_at"]:
             raise EscrowError("conflict", "The booking time has not started yet.")
+        if conn.execute("SELECT 1 FROM disputes WHERE voucher_id=? AND status='open'", (voucher_id,)).fetchone():
+            # a seller must never be able to pay themselves while the customer's claim is being reviewed
+            raise EscrowError("conflict", "The customer has raised a problem with this booking. "
+                                          "Refund them or contest it; Konsyer decides.")
         _release(conn, v, v["payee_phone"], "the business confirmed", "released_by_merchant", at)
         v = conn.execute("SELECT * FROM vouchers WHERE id=?", (voucher_id,)).fetchone()
     return {"ok": True, "voucher": _view(v, at)}

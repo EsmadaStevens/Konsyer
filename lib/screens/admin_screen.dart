@@ -3,13 +3,16 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../dispute_card.dart';
 
-/// DEMO admin console, for the video. The admin key is typed here each time and is never saved.
+/// Konsyer admin: verify businesses and decide photo reviews. The admin key is typed here each time and never saved.
 /// A production version would live behind real admin sign-in, not in the customer app.
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
   @override
   State<AdminScreen> createState() => _AdminScreenState();
 }
+
+/// Clock controls exist only in recording builds: flutter run --dart-define=DEMO=true
+const _demo = bool.fromEnvironment('DEMO');
 
 class _AdminScreenState extends State<AdminScreen> {
   final _key = TextEditingController();
@@ -84,12 +87,12 @@ class _AdminScreenState extends State<AdminScreen> {
             Expanded(child: Text((d['label'] ?? '').toString(), style: t.titleMedium)),
             Text(fmtK((d['amount'] as num).toInt())),
           ]),
-          Text('Seller: ${d['payee_name']}${d['payee_verified'] == true ? ' (verified)' : ''}', style: t.bodySmall),
-          DisputeCard(d),
+          Text('Seller: ${d['payee_name']}${d['payee_verified'] == true ? ' (verified)' : ''}  -  ${d['stage'] == 'konsyer' ? 'needs Konsyer to decide' : 'waiting for the seller to reply'}', style: t.bodySmall),
+          DisputeCard(d, loadPhoto: () => apiGetBytes('/admin/disputes/${d['id']}/photo', headers: _headers)),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton(onPressed: _busy ? null : () => _resolve(d, 'refund'), child: const Text('Refund customer')),
-            OutlinedButton(onPressed: _busy ? null : () => _resolve(d, 'reject'), child: const Text('Keep payment')),
+            OutlinedButton(onPressed: _busy ? null : () => _resolve(d, 'reject'), child: const Text('Reject claim')),
           ]),
         ]),
       ),
@@ -152,6 +155,25 @@ class _AdminScreenState extends State<AdminScreen> {
             Text('No page link given.', style: t.bodySmall),
           Text('Listings awaiting verification: ${m['claimed_listings']}   Live: ${m['verified_listings']}',
               style: t.bodySmall),
+          for (final l in ((m['pending_listings'] as List?) ?? []).cast<Map<String, dynamic>>())
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(120),
+                    borderRadius: BorderRadius.circular(8)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${l['title']}  -  ${fmtK((l['price'] as num).toInt())}', style: t.titleSmall),
+                  Text((l['description'] ?? '').toString().isEmpty ? 'No description.' : l['description'].toString(),
+                      style: t.bodySmall),
+                  Text(l['photo_checked'] == true
+                          ? 'Photo check: on (the description is specific).'
+                          : 'Photo check: off (too vague, so disputes go straight to a person).',
+                      style: t.labelSmall),
+                ]),
+              ),
+            ),
           const SizedBox(height: 8),
           FilledButton(
             onPressed: (_busy || !review) ? null : () => _verify(m['merchant_id'] as int),
@@ -166,16 +188,8 @@ class _AdminScreenState extends State<AdminScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Demo admin console')),
+      appBar: AppBar(title: const Text('Konsyer admin')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-              color: cs.errorContainer.withAlpha(90), borderRadius: BorderRadius.circular(10)),
-          child: const Text('Demo console for the video. Verification is a human decision: check the business '
-              'page against the name and number before you verify. The key is typed here and never saved.'),
-        ),
-        const SizedBox(height: 12),
         TextField(
           controller: _key,
           obscureText: true,
@@ -186,17 +200,14 @@ class _AdminScreenState extends State<AdminScreen> {
         FilledButton(onPressed: _busy ? null : _load, child: Text(_busy ? 'Working...' : 'Load businesses')),
         if (_error != null)
           Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: TextStyle(color: cs.error))),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _advance,
-          icon: const Icon(Icons.fast_forward_outlined),
-          label: const Text('Demo clock: fast-forward 24 hours'),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text('Video only: shows held money being released 30 minutes after a service ends.',
-              style: Theme.of(context).textTheme.labelSmall),
-        ),
+        if (_demo) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _advance,
+            icon: const Icon(Icons.fast_forward_outlined),
+            label: const Text('Move the clock forward 24 hours'),
+          ),
+        ],
         const SizedBox(height: 8),
         if (_disputes.isNotEmpty) ...[
           const SizedBox(height: 8),
