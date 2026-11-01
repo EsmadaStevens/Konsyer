@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import activity, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, wallet
+from . import activity, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -98,6 +98,11 @@ class ReleaseIn(BaseModel):
 class ReportIn(BaseModel):
     user_id: int = 1
     reason: str
+
+
+class OfferIn(BaseModel):
+    user_id: int = 1
+    slot_id: int
 
 
 class AdvanceIn(BaseModel):
@@ -358,6 +363,26 @@ def voucher_merchant_confirm(voucher_id: int, body: ActionIn, conn=Depends(db)):
 @app.post("/vouchers/{voucher_id}/merchant-cancel")
 def voucher_merchant_cancel(voucher_id: int, body: ActionIn, conn=Depends(db)):
     return _escrow_call(escrow.merchant_cancel, conn, body.user_id, voucher_id)
+
+
+@app.get("/vouchers/{voucher_id}/reschedule-options")
+def reschedule_options(voucher_id: int, user_id: int = 1, conn=Depends(db)):
+    return _escrow_call(reschedule.options, conn, user_id, voucher_id)
+
+
+@app.post("/vouchers/{voucher_id}/merchant-offer")
+def voucher_merchant_offer(voucher_id: int, body: OfferIn, conn=Depends(db)):
+    return _escrow_call(reschedule.offer, conn, body.user_id, voucher_id, body.slot_id)
+
+
+@app.post("/vouchers/{voucher_id}/accept-offer")
+def voucher_accept_offer(voucher_id: int, body: ActionIn, conn=Depends(db)):
+    return _escrow_call(reschedule.accept, conn, body.user_id, voucher_id)
+
+
+@app.post("/vouchers/{voucher_id}/decline-offer")
+def voucher_decline_offer(voucher_id: int, body: ActionIn, conn=Depends(db)):
+    return _escrow_call(reschedule.decline, conn, body.user_id, voucher_id)
 
 
 @app.post("/admin/advance-time")

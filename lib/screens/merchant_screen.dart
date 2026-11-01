@@ -163,6 +163,51 @@ class _MerchantScreenState extends State<MerchantScreen> {
     }
   }
 
+  /// Cannot make the appointment? Offer one of your other times. The customer accepts it or takes a full refund.
+  Future<void> _offerNewTime(Map<String, dynamic> v) async {
+    setState(() => busy = true);
+    List<Map<String, dynamic>> slots = [];
+    try {
+      final j = await apiGet('/vouchers/${v['id']}/reschedule-options?user_id=$userId');
+      slots = ((j['slots'] as List?) ?? []).cast<Map<String, dynamic>>();
+    } catch (e) {
+      _toast('$e');
+      return;
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+    if (!mounted) return;
+    if (slots.isEmpty) return _toast('No other time with room is open. Add a time to the listing first.');
+    final pick = await showDialog<int>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('Offer a new time'),
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text('The customer can accept it or take a full refund. Their money stays held until they answer.'),
+          ),
+          for (final s in slots)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, (s['slot_id'] as num).toInt()),
+              child: Text('${s['starts']}${s['ends'] == null ? '' : ' to ${s['ends']}'}'),
+            ),
+        ],
+      ),
+    );
+    if (pick == null) return;
+    setState(() => busy = true);
+    try {
+      await apiPost('/vouchers/${v['id']}/merchant-offer', {'user_id': userId, 'slot_id': pick});
+      _toast('Offer sent. The customer can accept or take a full refund.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   Widget _booking(Map<String, dynamic> v) {
     final t = Theme.of(context).textTheme;
     final held = v['state'] == 'held';
@@ -183,11 +228,16 @@ class _MerchantScreenState extends State<MerchantScreen> {
               padding: const EdgeInsets.only(top: 8),
               child: Wrap(spacing: 8, runSpacing: 8, children: [
                 FilledButton(
-                  onPressed: (busy || v['can_confirm'] != true)
+                  onPressed: (busy || v['can_confirm'] != true || v['offer'] != null)
                       ? null
                       : () => _bookingAction(v, 'merchant-confirm', 'Confirmed. Payment released (simulated).'),
                   child: const Text('Customer arrived'),
                 ),
+                if (v['can_offer_new_time'] == true)
+                  OutlinedButton(
+                    onPressed: busy ? null : () => _offerNewTime(v),
+                    child: const Text('Offer a new time'),
+                  ),
                 OutlinedButton(
                   onPressed: busy
                       ? null
@@ -195,6 +245,12 @@ class _MerchantScreenState extends State<MerchantScreen> {
                   child: const Text('Cancel booking'),
                 ),
               ]),
+            ),
+          if (held && v['offer'] != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('You offered ${(v['offer'] as Map)['starts']}. Waiting for the customer to accept or take a refund.',
+                  style: t.labelSmall),
             ),
           if (held && v['can_confirm'] != true)
             Text('You can confirm once the booking time has started.', style: t.labelSmall),

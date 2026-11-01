@@ -276,7 +276,9 @@ def cancel(conn, user_id, voucher_id, at=None):
         v = _get(conn, user_id, voucher_id)
         _must_be_held(v)
         paid, resolution = 0, "cancelled_by_user"
-        if v["payee_verified"] and v["free_cancel_until"] and _iso(at) > v["free_cancel_until"]:
+        if v["offer_slot_id"]:  # the seller asked to move the booking: the customer may always walk away in full
+            paid, resolution = 0, "declined_new_time"
+        elif v["payee_verified"] and v["free_cancel_until"] and _iso(at) > v["free_cancel_until"]:
             paid, resolution = v["amount"] * v["forfeit_pct"] // 100, "cancelled_late"
         _refund(conn, v, resolution, at, paid)
         v = conn.execute("SELECT * FROM vouchers WHERE id=?", (voucher_id,)).fetchone()
@@ -316,6 +318,8 @@ def merchant_confirm(conn, owner_user_id, voucher_id, at=None):
         v = _merchant_voucher(conn, owner_user_id, voucher_id)
         if v["starts_at"] and _iso(at) < v["starts_at"]:
             raise EscrowError("conflict", "The booking time has not started yet.")
+        if v["offer_slot_id"]:
+            raise EscrowError("conflict", "You offered this customer a new time. Wait for their answer.")
         if conn.execute("SELECT 1 FROM disputes WHERE voucher_id=? AND status='open'", (voucher_id,)).fetchone():
             # a seller must never be able to pay themselves while the customer's claim is being reviewed
             raise EscrowError("conflict", "The customer has raised a problem with this booking. "
@@ -345,6 +349,11 @@ def sweep(conn, user_id=None, at=None) -> int:
             "(SELECT 1 FROM disputes d WHERE d.voucher_id=vouchers.id AND d.status='open')",
             (user_id, user_id)).fetchall()
         for v in rows:
+            if v["offer_slot_id"]:  # an unanswered offer never pays the seller: it lapses into a full refund
+                if v["starts_at"] and v["starts_at"] <= stamp:
+                    _refund(conn, v, "offer_lapsed", at)
+                    n += 1
+                continue
             if v["auto_release_at"] and v["auto_release_at"] <= stamp:
                 _release(conn, v, v["payee_phone"], "nobody objected within 30 minutes of the service ending", "auto_released", at)
                 n += 1
@@ -395,7 +404,20 @@ def list_for_user(conn, user_id, at=None) -> list:
     sweep(conn, user_id, at)
     rows = conn.execute("SELECT * FROM vouchers WHERE user_id=? ORDER BY (state='held') DESC, id DESC",
                         (user_id,)).fetchall()
-    return [_view(v, at) for v in rows]
+    return [_with_offer(conn, v, _view(v, at), customer=True) for v in rows]
+
+
+def _with_offer(conn, v, d, customer=False):
+    """Adds the seller's pending offer of a new time (read-only; reschedule.py changes it)."""
+    d["offer"] = None
+    if v["state"] == "held" and v["offer_slot_id"]:
+        s = conn.execute("SELECT starts_at, ends_at FROM slots WHERE id=?", (v["offer_slot_id"],)).fetchone()
+        if s:
+            d["offer"] = {"slot_id": v["offer_slot_id"], "starts": fmt_local(s["starts_at"]),
+                          "ends": fmt_local(s["ends_at"]) if s["ends_at"] else None}
+            if customer:  # while an offer is open the only choices are accept or take everything back
+                d.update(can_release=False, can_report=False)
+    return d
 
 
 def list_for_merchant(conn, owner_user_id, merchant_id, at=None) -> list:
@@ -411,6 +433,8 @@ def list_for_merchant(conn, owner_user_id, merchant_id, at=None) -> list:
         d = _view(v, at)
         d.update(can_release=False, can_cancel=False, can_report=False,
                  can_confirm=v["state"] == "held" and not (v["starts_at"] and _iso(at) < v["starts_at"]),
-                 can_seller_cancel=v["state"] == "held")
-        out.append(d)
+                 can_seller_cancel=v["state"] == "held",
+                 can_offer_new_time=v["state"] == "held" and v["booking_id"] is not None
+                 and not v["offer_slot_id"])
+        out.append(_with_offer(conn, v, d))
     return out
