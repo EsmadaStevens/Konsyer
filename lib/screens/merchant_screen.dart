@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../dispute_card.dart';
 
 String? _orNull(String s) => s.trim().isEmpty ? null : s.trim();
 
@@ -100,9 +101,38 @@ class _MerchantScreenState extends State<MerchantScreen> {
     }
   }
 
+  Future<void> _resolve(Map<String, dynamic> d, String decision) async {
+    final refund = decision == 'refund';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(refund ? 'Refund the customer?' : 'Keep the payment?'),
+        content: Text(refund
+            ? 'The held money goes back to the customer in full.'
+            : 'The claim is rejected. The payment continues as normal and is released after the usual wait.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(refund ? 'Refund' : 'Keep payment')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => busy = true);
+    try {
+      await apiPost('/disputes/${d['id']}/resolve', {'user_id': userId, 'decision': decision});
+      _toast(refund ? 'Refunded. The customer got their money back.' : 'Claim rejected. The payment continues.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   Widget _booking(Map<String, dynamic> v) {
     final t = Theme.of(context).textTheme;
     final held = v['state'] == 'held';
+    final dispute = (v['dispute'] as Map?)?.cast<String, dynamic>();
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
@@ -134,6 +164,19 @@ class _MerchantScreenState extends State<MerchantScreen> {
             ),
           if (held && v['can_confirm'] != true)
             Text('You can confirm once the booking time has started.', style: t.labelSmall),
+          if (dispute != null) DisputeCard(dispute),
+          if (v['can_resolve'] == true && dispute != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                FilledButton(
+                    onPressed: busy ? null : () => _resolve(dispute, 'refund'),
+                    child: const Text('Refund customer')),
+                OutlinedButton(
+                    onPressed: busy ? null : () => _resolve(dispute, 'reject'),
+                    child: const Text('Keep payment')),
+              ]),
+            ),
         ]),
       ),
     );

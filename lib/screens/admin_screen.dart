@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
+import '../dispute_card.dart';
 
 /// DEMO admin console, for the video. The admin key is typed here each time and is never saved.
 /// A production version would live behind real admin sign-in, not in the customer app.
@@ -13,6 +14,7 @@ class AdminScreen extends StatefulWidget {
 class _AdminScreenState extends State<AdminScreen> {
   final _key = TextEditingController();
   List<Map<String, dynamic>> _rows = [];
+  List<Map<String, dynamic>> _disputes = [];
   bool _busy = false;
   String? _error;
 
@@ -26,8 +28,10 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() => _busy = true);
     try {
       final j = await apiGet('/admin/merchants', headers: _headers);
+      final dj = await apiGet('/admin/disputes', headers: _headers);
       if (mounted) {
         setState(() {
+          _disputes = (dj['disputes'] as List).cast<Map<String, dynamic>>();
           _rows = (j['merchants'] as List).cast<Map<String, dynamic>>();
           _error = null;
         });
@@ -36,6 +40,7 @@ class _AdminScreenState extends State<AdminScreen> {
       if (mounted) {
         setState(() {
           _rows = [];
+          _disputes = [];
           _error = '$e';
         });
       }
@@ -54,6 +59,41 @@ class _AdminScreenState extends State<AdminScreen> {
       _toast('$e');
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _resolve(Map<String, dynamic> d, String decision) async {
+    setState(() => _busy = true);
+    try {
+      await apiPost('/admin/disputes/${d['id']}/resolve', {'decision': decision}, headers: _headers);
+      _toast(decision == 'refund' ? 'Refunded the customer.' : 'Claim rejected. The payment continues.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _disputeCard(Map<String, dynamic> d) {
+    final t = Theme.of(context).textTheme;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text((d['label'] ?? '').toString(), style: t.titleMedium)),
+            Text(fmtK((d['amount'] as num).toInt())),
+          ]),
+          Text('Seller: ${d['payee_name']}${d['payee_verified'] == true ? ' (verified)' : ''}', style: t.bodySmall),
+          DisputeCard(d),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton(onPressed: _busy ? null : () => _resolve(d, 'refund'), child: const Text('Refund customer')),
+            OutlinedButton(onPressed: _busy ? null : () => _resolve(d, 'reject'), child: const Text('Keep payment')),
+          ]),
+        ]),
+      ),
+    );
   }
 
   Future<void> _advance() async {
@@ -158,6 +198,12 @@ class _AdminScreenState extends State<AdminScreen> {
               style: Theme.of(context).textTheme.labelSmall),
         ),
         const SizedBox(height: 8),
+        if (_disputes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Photo reviews waiting for a person', style: Theme.of(context).textTheme.titleMedium),
+          for (final d in _disputes) _disputeCard(d),
+          const Divider(height: 24),
+        ],
         for (final m in _rows) _card(m),
       ]),
     );
