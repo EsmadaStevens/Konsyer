@@ -44,6 +44,10 @@ def seed(conn, today):
     listing("Sample Afrobeats Night", "event", 15000, ["music", "dance", "nightlife"], -15.3900, 28.3100,
             "Roma", 0, 0.4, source="flyer", alcohol=1, desc="Late night event from a flyer; organizer unverified.",
             slots=[(sat, 21, 0, sun, 2, 0, 100)])
+    listing("Sample Nail Bar", "service", 15000, ["nails", "beauty", "salon", "french tips"], -15.4100, 28.3050,
+            "Kabulonga", 1, 0.9,
+            desc="French tips gel set: nude pink base with clean white tips, square shape, glossy finish.",
+            slots=[(sat, 10, 0, sat, 12, 0, 6), (sat, 13, 0, sat, 15, 0, 6)])
     listing("Sample Nail Studio", "service", 30000, ["nails", "beauty", "salon"], -15.4150, 28.2900,
             "Northmead", 0, 0.45, source="web_lead", desc="Gel nails. Contact details unverified.")
     conn.commit()

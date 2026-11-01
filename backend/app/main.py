@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import escrow, executor, flyers, leads, merchants, wallet
+from . import disputes, escrow, executor, flyers, leads, merchants, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -81,6 +81,15 @@ class LeadFeedbackIn(BaseModel):
     user_id: int = 1
     status: Optional[str] = None
     price: Optional[str] = None
+
+
+class ResolveIn(BaseModel):
+    user_id: int = 1
+    decision: str
+
+
+class AdminResolveIn(BaseModel):
+    decision: str
 
 
 class PayoutCheckIn(BaseModel):
@@ -314,7 +323,7 @@ def _escrow_call(fn, *args, **kw):
 @app.get("/vouchers")
 def my_vouchers(user_id: int = 1, conn=Depends(db)):
     return {"sandbox": True, "held": escrow.held_total(conn, user_id),
-            "vouchers": _escrow_call(escrow.list_for_user, conn, user_id)}
+            "vouchers": disputes.attach(conn, _escrow_call(escrow.list_for_user, conn, user_id))}
 
 
 @app.post("/leads/{lead_id}/hold")
@@ -346,7 +355,8 @@ def report_voucher(voucher_id: int, body: ReportIn, conn=Depends(db)):
 
 @app.get("/merchants/{merchant_id}/vouchers")
 def merchant_vouchers(merchant_id: int, user_id: int = 1, conn=Depends(db)):
-    return {"vouchers": _escrow_call(escrow.list_for_merchant, conn, user_id, merchant_id)}
+    return {"vouchers": disputes.attach(conn, _escrow_call(escrow.list_for_merchant, conn, user_id, merchant_id),
+                                        merchant=True)}
 
 
 @app.post("/vouchers/{voucher_id}/merchant-confirm")
@@ -382,3 +392,38 @@ def lead_contact(lead_id: int, body: LeadContactIn, conn=Depends(db)):
 @app.post("/leads/{lead_id}/feedback")
 def lead_feedback(lead_id: int, body: LeadFeedbackIn, conn=Depends(db)):
     return _lead_call(leads.record_feedback, conn, body.user_id, lead_id, body.status, body.price)
+
+
+# ---------- photo disputes: the model gives a recommendation, a person decides ----------
+def _dispute_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except disputes.DisputeError as e:
+        raise HTTPException(status_code=disputes.STATUS.get(e.code, 400), detail=e.message)
+
+
+@app.post("/vouchers/{voucher_id}/dispute")
+def dispute_voucher(voucher_id: int, photo: UploadFile = File(...), note: str = Form(""), user_id: int = Form(1),
+                    conn=Depends(db)):
+    if os.environ.get("KONSYER_STUB") == "1" or not os.environ.get("LLM_API_KEY"):
+        raise HTTPException(status_code=503, detail="The photo check needs a model key. See the README.")
+    data = photo.file.read(disputes.MAX_BYTES + 1)  # never read more than the cap plus one byte
+    return _dispute_call(disputes.open_dispute, conn, user_id, voucher_id, note, data)
+
+
+@app.post("/disputes/{dispute_id}/resolve")
+def resolve_dispute_as_business(dispute_id: int, body: ResolveIn, conn=Depends(db)):
+    return _dispute_call(disputes.resolve, conn, body.user_id, dispute_id, body.decision)
+
+
+@app.get("/admin/disputes")
+def admin_disputes(x_admin_key: str = Header(default=""), conn=Depends(db)):
+    _require_admin(x_admin_key)
+    return {"disputes": disputes.list_open(conn)}
+
+
+@app.post("/admin/disputes/{dispute_id}/resolve")
+def resolve_dispute_as_admin(dispute_id: int, body: AdminResolveIn, x_admin_key: str = Header(default=""),
+                             conn=Depends(db)):
+    _require_admin(x_admin_key)
+    return _dispute_call(disputes.resolve, conn, 0, dispute_id, body.decision, True)

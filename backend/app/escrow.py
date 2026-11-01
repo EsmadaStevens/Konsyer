@@ -336,8 +336,10 @@ def sweep(conn, user_id=None, at=None) -> int:
     at = at or now(conn)
     stamp, n = _iso(at), 0
     with _transaction(conn):
-        rows = conn.execute("SELECT * FROM vouchers WHERE state='held' AND (? IS NULL OR user_id=?)",
-                            (user_id, user_id)).fetchall()
+        rows = conn.execute(  # money is not auto-settled while a person is reviewing a photo dispute
+            "SELECT * FROM vouchers WHERE state='held' AND (? IS NULL OR user_id=?) AND NOT EXISTS "
+            "(SELECT 1 FROM disputes d WHERE d.voucher_id=vouchers.id AND d.status='open')",
+            (user_id, user_id)).fetchall()
         for v in rows:
             if v["auto_release_at"] and v["auto_release_at"] <= stamp:
                 _release(conn, v, v["payee_phone"], "nobody objected for 24 hours", "auto_released", at)

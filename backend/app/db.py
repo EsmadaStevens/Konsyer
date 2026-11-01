@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS vouchers(
   resolution TEXT, payout_ref TEXT, idem_key TEXT UNIQUE,
   created_at TEXT NOT NULL, resolved_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_vouchers_user ON vouchers(user_id, state);
+CREATE TABLE IF NOT EXISTS disputes(
+  id INTEGER PRIMARY KEY, voucher_id INTEGER NOT NULL REFERENCES vouchers(id),
+  user_id INTEGER NOT NULL REFERENCES users(id), attempt INTEGER NOT NULL, note TEXT,
+  verdict TEXT NOT NULL CHECK(verdict IN ('match','mismatch','unclear')), model_verdict TEXT,
+  promised TEXT, observed TEXT, differences TEXT, image_quality TEXT, confidence REAL, forced_unclear TEXT, model TEXT,
+  status TEXT NOT NULL CHECK(status IN ('open','retry','no_issue','refunded','rejected')),
+  created_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT);
+CREATE INDEX IF NOT EXISTS idx_disputes_voucher ON disputes(voucher_id, status);
 CREATE TABLE IF NOT EXISTS lead_feedback(
   user_id INTEGER NOT NULL REFERENCES users(id), lead_key TEXT NOT NULL, lead_name TEXT,
   status TEXT CHECK(status IN ('open','no_reply','closed')), price TEXT CHECK(price IN ('matched','differs')),
