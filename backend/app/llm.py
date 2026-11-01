@@ -14,6 +14,7 @@ JOBS = {
     "agent": "Muse Spark: understands the request, picks tools",
     "web_search": "Meta Model API: web search for outside businesses",
     "flyer_vision": "Muse Spark vision: reads a flyer into a draft listing",
+    "listing_vision": "Muse Spark vision: describes a product photo as a listing",
     "dispute_vision": "Muse Spark vision: compares a photo with the listing",
 }
 

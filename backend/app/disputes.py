@@ -24,6 +24,7 @@ from . import escrow
 from .contact import one_line
 from .flyers import detect_image
 from .llm import LLMError, as_job, chat
+from .specificity import is_specific
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_ATTEMPTS = 3
@@ -168,7 +169,7 @@ def _message(status, verdict, stage):
     if status == "open":
         if stage == "konsyer":
             return ("Konsyer is reviewing this. A person will decide, and your money stays held until then.")
-        flagged = "does not seem to match the listing" if verdict == "mismatch" else "was still unclear"
+        flagged = "does not seem to match the listing" if verdict == "mismatch" else "could not be checked automatically"
         return (f"The photo {flagged}. The seller has {SELLER_REPLY_HOURS} hours to refund you or contest. "
                 "If they contest or do not reply, Konsyer reviews it. Your money stays held meanwhile.")
     return {
@@ -268,9 +269,17 @@ def open_dispute(conn, user_id, voucher_id, note, image: bytes, assess_fn: Optio
     if len(prev) >= MAX_ATTEMPTS:
         raise DisputeError("conflict", "The maximum number of photo checks was reached. Use Report a problem instead.")
 
-    result = (assess_fn or assess)(listing_text, note, image)  # slow network call: no database lock is held here
+    desc = conn.execute("SELECT description FROM listings WHERE id=?", (v["listing_id"],)).fetchone()["description"]
+    vague = not is_specific(desc)
+    if vague:
+        # a vague promise gives the model nothing to compare: do not guess, send it straight to a person
+        result = {"model_verdict": "unclear", "verdict": "unclear", "image_quality": "good", "confidence": 0.0,
+                  "promised": one_line(desc, 200), "observed": "", "differences": [],
+                  "adjusted": "the listing description is too vague for an automatic photo check"}
+    else:
+        result = (assess_fn or assess)(listing_text, note, image)  # slow call: no database lock is held here
     unclear_so_far = sum(1 for p in prev if p["status"] == "retry") + (1 if result["verdict"] == "unclear" else 0)
-    if result["verdict"] == "mismatch":
+    if vague or result["verdict"] == "mismatch":
         status = "open"
     elif result["verdict"] == "match":
         status = "no_issue"
@@ -287,7 +296,8 @@ def open_dispute(conn, user_id, voucher_id, note, image: bytes, assess_fn: Optio
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (voucher_id, user_id, len(prev) + 1, note, result["verdict"], result["model_verdict"], result["promised"],
              result["observed"], json.dumps(result["differences"], ensure_ascii=False), result["image_quality"],
-             result["confidence"], result["adjusted"], _model_name(), status, escrow._iso(at),
+             result["confidence"], result["adjusted"], "none (vague listing)" if vague else _model_name(),
+             status, escrow._iso(at),
              image if status == "open" else None)).lastrowid  # kept only while a person must look at it
         conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
                      (user_id, "dispute_assessed",

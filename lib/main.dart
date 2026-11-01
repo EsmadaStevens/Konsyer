@@ -3,7 +3,6 @@ import '/screens/activity_screen.dart';
 import '/screens/admin_screen.dart';
 import '/api.dart';
 import '/contact_card.dart';
-import '/screens/flyer_screen.dart';
 import '/screens/merchant_screen.dart';
 import '/screens/vouchers_screen.dart';
 
@@ -75,12 +74,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _addFlyer() async {
-    final msg = await Navigator.of(context)
-        .push<String>(MaterialPageRoute(builder: (_) => const FlyerScreen()));
-    if (msg != null && mounted) setState(() => _msgs.add(Msg(false, msg)));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -100,15 +93,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
           ),
           IconButton(
-            tooltip: 'Demo admin console',
+            tooltip: 'Admin',
             icon: const Icon(Icons.admin_panel_settings_outlined),
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const AdminScreen())),
-          ),
-          IconButton(
-            tooltip: 'Add a flyer',
-            icon: const Icon(Icons.photo_camera_outlined),
-            onPressed: _addFlyer,
           ),
           IconButton(
             tooltip: 'Wallet',

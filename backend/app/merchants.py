@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 
 from .contact import is_http_url
 from .flyers import MAX_PRICE, TYPES, normalize_phone
+from .specificity import ADVICE, is_specific
 from .timeutil import LUSAKA, to_utc_iso
 
 VERIFIED_TRUST = 0.8     # trust given to a verified merchant's listings (policy needs >= 0.5)
@@ -80,6 +81,15 @@ def _parse_slot(s, today, n):
     return to_utc_iso(start), (to_utc_iso(end) if end else None), cap
 
 
+def require_owner(conn, user_id, merchant_id):
+    """Only the owner of a registered business may draft or add listings."""
+    m = conn.execute("SELECT owner_user_id FROM merchants WHERE id=?", (merchant_id,)).fetchone()
+    if m is None:
+        raise MerchantError("not_found", "Merchant not found.")
+    if m["owner_user_id"] != user_id:
+        raise MerchantError("forbidden", "Only the business owner can add listings.")
+
+
 def add_listing(conn, user_id, merchant_id, f, today):
     m = conn.execute("SELECT * FROM merchants WHERE id=?", (merchant_id,)).fetchone()
     if m is None:
@@ -119,8 +129,10 @@ def add_listing(conn, user_id, merchant_id, f, today):
     except Exception:
         conn.rollback()
         raise
-    return {"listing_id": lid, "status": "claimed", "slots": len(parsed),
-            "message": "Submitted. It will appear to customers after Konsyer verifies your business."}
+    checked = is_specific(f.get("description"))
+    msg = "Submitted. It will appear to customers after Konsyer verifies your business."
+    return {"listing_id": lid, "status": "claimed", "slots": len(parsed), "photo_checked": checked,
+            "message": msg if checked else msg + " " + ADVICE}
 
 
 def get_merchant(conn, user_id, merchant_id):
@@ -145,7 +157,12 @@ def admin_list(conn):
     for m in conn.execute("SELECT * FROM merchants WHERE is_sample=0 ORDER BY id DESC").fetchall():
         counts = {r["status"]: r["n"] for r in conn.execute(
             "SELECT status, COUNT(*) AS n FROM listings WHERE merchant_id=? GROUP BY status", (m["id"],))}
+        pending = [{"listing_id": r["id"], "title": r["name"], "description": r["description"] or "",
+                    "price": r["price"], "photo_checked": is_specific(r["description"])}
+                   for r in conn.execute("SELECT id, name, description, price FROM listings "
+                                         "WHERE merchant_id=? AND status='claimed' ORDER BY id", (m["id"],))]
         out.append({"merchant_id": m["id"], "name": m["name"], "area": m["area"], "whatsapp": m["whatsapp"],
+                    "pending_listings": pending,
                     "social_url": m["social_url"], "verified": bool(m["verified"]),
                     "claimed_listings": counts.get("claimed", 0), "verified_listings": counts.get("verified", 0),
                     "needs_review": (not m["verified"]) or counts.get("claimed", 0) > 0})

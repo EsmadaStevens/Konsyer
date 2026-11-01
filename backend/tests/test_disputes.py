@@ -516,3 +516,16 @@ def test_api_contest_and_photo_access(client, tmp_path, monkeypatch):
     assert client.get(f"/disputes/{did}/photo?user_id=2").status_code == 404
     listed = client.get("/admin/disputes", headers={"X-Admin-Key": KEY}).json()["disputes"]
     assert listed[0]["seller_note"] == "She chose almond shape"
+
+
+def test_a_vague_listing_skips_the_model_and_goes_straight_to_a_person(conn):
+    vid = book(conn)
+    lid = voucher(conn, vid)["listing_id"]
+    conn.execute("UPDATE listings SET description='Nice nails.' WHERE id=?", (lid,))
+
+    def must_not_run(*a):
+        raise AssertionError("the model must not be asked to compare against a vague promise")
+    d = disputes.open_dispute(conn, 1, vid, "wrong colour", JPG, must_not_run)["dispute"]
+    assert d["status"] == "open" and d["verdict"] == "unclear" and "too vague" in d["adjusted"]
+    assert d["stage"] == "seller" and d["has_photo"] is True  # a person can see the photo
+    assert conn.execute("SELECT model FROM disputes WHERE id=?", (d["id"],)).fetchone()["model"].startswith("none")

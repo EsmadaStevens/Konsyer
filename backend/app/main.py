@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import activity, disputes, escrow, executor, flyers, leads, merchants, wallet
+from . import activity, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -49,21 +49,6 @@ class TopupIn(BaseModel):
     user_id: int = 1
     amount_ngwee: int
     idempotency_key: Optional[str] = None
-
-
-class FlyerConfirmIn(BaseModel):
-    user_id: int = 1
-    title: str
-    listing_type: str
-    date: Optional[str] = None
-    start_time: Optional[str] = None
-    venue: Optional[str] = None
-    area: Optional[str] = None
-    price_ngwee: Optional[int] = None
-    serves_alcohol: bool = False
-    contact_phone: Optional[str] = None
-    performers: list[str] = []
-    availability_text: Optional[str] = None
 
 
 class HoldIn(BaseModel):
@@ -248,24 +233,24 @@ def get_plan(plan_id: int, user_id: int = 1, conn=Depends(db)):
     return {"card": plan_card(conn, plan_id)}
 
 
-# ---------- flyer / screenshot ingest ----------
-def _flyer_call(fn, *args):
+# ---------- listing drafts from a picture: registered business owners only ----------
+def _draft_call(fn, *args):
     try:
         return fn(*args)
     except flyers.FlyerError as e:
         raise HTTPException(status_code=flyers.STATUS.get(e.code, 400), detail=e.message)
 
 
-@app.post("/flyers")
-def upload_flyer(image: UploadFile = File(...), user_id: int = Form(1), kind: str = Form("flyer"),
-                 conn=Depends(db)):
+@app.post("/merchants/{merchant_id}/draft-from-flyer")
+def draft_from_flyer(merchant_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
     data = image.file.read(flyers.MAX_BYTES + 1)  # never read more than the cap plus one byte
-    return _flyer_call(flyers.create_draft, conn, user_id, kind, data, lusaka_today())
+    return _draft_call(listing_drafts.from_flyer, conn, user_id, merchant_id, data, lusaka_today())
 
 
-@app.post("/flyers/{flyer_id}/confirm")
-def confirm_flyer(flyer_id: int, body: FlyerConfirmIn, conn=Depends(db)):
-    return _flyer_call(flyers.confirm, conn, body.user_id, flyer_id, body.model_dump(), lusaka_today())
+@app.post("/merchants/{merchant_id}/draft-from-photo")
+def draft_from_photo(merchant_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
+    data = image.file.read(listing_drafts.MAX_PHOTO_BYTES + 1)
+    return _draft_call(listing_drafts.from_photo, conn, user_id, merchant_id, data)
 
 
 # ---------- merchants (signup is open; verification is admin-only) ----------
