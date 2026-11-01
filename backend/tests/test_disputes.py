@@ -216,8 +216,8 @@ def test_rejection_keeps_the_money_held_then_resumes_with_a_days_grace(conn):
     late = parse_utc(voucher(conn, vid)["auto_release_at"]) + timedelta(days=3)
     r = disputes.resolve(conn, 0, did, "reject", admin=True, at=late)
     assert r["dispute"]["status"] == "rejected" and voucher(conn, vid)["state"] == "held"
-    assert escrow.sweep(conn, 1, late + timedelta(hours=23)) == 0  # the buyer still has a day
-    assert escrow.sweep(conn, 1, late + timedelta(hours=25)) == 1
+    assert escrow.sweep(conn, 1, late + timedelta(minutes=29)) == 0  # still inside the short grace
+    assert escrow.sweep(conn, 1, late + timedelta(minutes=31)) == 1
     assert voucher(conn, vid)["state"] == "released"
 
 

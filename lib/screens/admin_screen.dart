@@ -194,7 +194,7 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Video only: shows held money being released 24 hours after a service.',
+          child: Text('Video only: shows held money being released 30 minutes after a service ends.',
               style: Theme.of(context).textTheme.labelSmall),
         ),
         const SizedBox(height: 8),

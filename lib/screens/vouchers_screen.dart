@@ -348,7 +348,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
                   child: ListView(padding: const EdgeInsets.all(16), children: [
                     Text(
                       'Sandbox money, simulated payouts. Konsyer holds the money until you confirm. '
-                      'For verified businesses it is also released 24 hours after the service if nobody objects.',
+                      'For verified businesses it is also released 30 minutes after the service ends if nobody objects.',
                       style: Theme.of(context).textTheme.labelMedium,
                     ),
                     const SizedBox(height: 8),

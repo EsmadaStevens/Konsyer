@@ -26,7 +26,7 @@ MAX_BYTES = 8 * 1024 * 1024
 MAX_ATTEMPTS = 3
 UNCLEAR_BEFORE_HUMAN = 2
 MIN_CONFIDENCE = 0.6
-RELEASE_GRACE_HOURS = 24  # after a rejection the buyer gets a day before an overdue auto-release happens
+RELEASE_GRACE_MINUTES = 30  # after a rejection, a short pause before an overdue auto-release happens
 VERDICTS = ("match", "mismatch", "unclear")
 QUALITIES = ("good", "poor", "not_relevant")
 STATUS = {"not_found": 404, "forbidden": 403, "invalid": 400, "conflict": 409, "model_unavailable": 502}
@@ -267,7 +267,7 @@ def _authorized(conn, resolver_id, v, admin) -> bool:
 
 def resolve(conn, resolver_id, dispute_id, decision, admin=False, at=None) -> dict:
     """The verified business owner or the admin decides. 'refund' returns the held money; 'reject' keeps it held and
-    resumes the normal timer (with a day's grace so a buyer is not paid out the instant a claim is rejected)."""
+    resumes the normal timer (with a short grace so the seller is not paid out in the same second a claim is rejected)."""
     if decision not in ("refund", "reject"):
         raise DisputeError("invalid", "Decision must be 'refund' or 'reject'.")
     at = at or escrow.now(conn)
@@ -287,7 +287,7 @@ def resolve(conn, resolver_id, dispute_id, decision, admin=False, at=None) -> di
         else:
             status = "rejected"
             if v["auto_release_at"]:
-                grace = escrow._iso(at + timedelta(hours=RELEASE_GRACE_HOURS))
+                grace = escrow._iso(at + timedelta(minutes=RELEASE_GRACE_MINUTES))
                 conn.execute("UPDATE vouchers SET auto_release_at=? WHERE id=? AND auto_release_at<?",
                              (grace, v["id"], grace))
         conn.execute("UPDATE disputes SET status=?, resolved_at=?, resolved_by=? WHERE id=?",
