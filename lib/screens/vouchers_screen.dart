@@ -229,19 +229,52 @@ class _VouchersScreenState extends State<VouchersScreen> {
     }
   }
 
-  Future<void> _report(Map<String, dynamic> v) async {
-    final reason = await showModalBottomSheet<String>(
+  /// One button for every problem: "Something's wrong" opens the choices that apply right now.
+  Future<void> _wrong(Map<String, dynamic> v) async {
+    final canReport = v['can_report'] == true;
+    final canDispute = v['can_dispute'] == true;
+    final dispute = (v['dispute'] as Map?)?.cast<String, dynamic>();
+    final pick = await showModalBottomSheet<String>(
       context: context,
       builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Padding(padding: EdgeInsets.all(16), child: Text('What went wrong?')),
-          for (final e in _reasons.entries) ListTile(title: Text(e.value), onTap: () => Navigator.pop(c, e.key)),
-        ]),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Padding(padding: EdgeInsets.all(16), child: Text('What is wrong?')),
+            if (canDispute)
+              ListTile(
+                leading: const Icon(Icons.add_a_photo_outlined),
+                title: Text(dispute != null && dispute['can_retry'] == true ? 'Try another photo' : 'It is not as described'),
+                subtitle: const Text('Add a photo of what you received. Konsyer compares it with the listing.'),
+                onTap: () => Navigator.pop(c, 'photo'),
+              ),
+            for (final e in _reasons.entries)
+              ListTile(
+                enabled: canReport,
+                title: Text(e.value),
+                subtitle: canReport ? null : const Text('Available once the booking time has started'),
+                onTap: () => Navigator.pop(c, e.key),
+              ),
+          ]),
+        ),
       ),
     );
-    if (reason == null) return;
-    await _run(() => apiPost('/vouchers/${v['id']}/report', {'user_id': userId, 'reason': reason}),
+    if (pick == null) return;
+    if (pick == 'photo') return _dispute(v);
+    await _run(() => apiPost('/vouchers/${v['id']}/report', {'user_id': userId, 'reason': pick}),
         (_) => 'Reported. Your money was returned to your wallet.');
+  }
+
+  Future<void> _acceptOffer(Map<String, dynamic> v) async {
+    await _run(() => apiPost('/vouchers/${v['id']}/accept-offer', {'user_id': userId}),
+        (_) => 'New time accepted. Your money is still held.');
+  }
+
+  Future<void> _declineOffer(Map<String, dynamic> v) async {
+    final ok = await _confirm('Take a full refund?', 'The booking is cancelled and all of ${v['amount_display']} '
+        'goes back to your wallet. No cancellation fee.', 'Refund me');
+    if (!ok) return;
+    await _run(() => apiPost('/vouchers/${v['id']}/decline-offer', {'user_id': userId}),
+        (_) => 'Refunded in full.');
   }
 
   String _stateLabel(String s) {
@@ -268,6 +301,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
     final canReport = v['can_report'] == true;
     final canDispute = v['can_dispute'] == true;
     final dispute = (v['dispute'] as Map?)?.cast<String, dynamic>();
+    final offer = (v['offer'] as Map?)?.cast<String, dynamic>();
     final paid = (v['paid_amount'] as num).toInt();
     final back = (v['refunded_amount'] as num).toInt();
     return Card(
@@ -308,26 +342,32 @@ class _VouchersScreenState extends State<VouchersScreen> {
               child: Text('Under review. Automatic release is paused while a person looks at this.',
                   style: t.labelSmall),
             ),
-          if (held) ...[
+          if (held && offer != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: cs.primaryContainer.withAlpha(60), borderRadius: BorderRadius.circular(8)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('The seller cannot make this time and offers a new one', style: t.titleSmall),
+                const SizedBox(height: 4),
+                Text('New time: ${offer['starts']}', style: t.bodyMedium),
+                Text('Your money stays held. Accept it, or take everything back with no fee.', style: t.bodySmall),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  FilledButton(onPressed: _busy ? null : () => _acceptOffer(v), child: const Text('Accept new time')),
+                  OutlinedButton(onPressed: _busy ? null : () => _declineOffer(v), child: const Text('Refund me')),
+                ]),
+              ]),
+            ),
+          ] else if (held) ...[
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              if (canDispute)
-                OutlinedButton.icon(
-                    onPressed: _busy ? null : () => _dispute(v),
-                    icon: const Icon(Icons.add_a_photo_outlined),
-                    label: Text(dispute != null && dispute['can_retry'] == true ? 'Try another photo' : 'Not as described')),
-              FilledButton(
-                  onPressed: _busy ? null : () => _release(v), child: const Text('I received it')),
+              FilledButton(onPressed: _busy ? null : () => _release(v), child: const Text('I received it')),
               OutlinedButton(onPressed: _busy ? null : () => _cancel(v), child: const Text('Cancel')),
               TextButton(
-                  onPressed: (_busy || !canReport) ? null : () => _report(v),
-                  child: const Text('Report a problem')),
+                  onPressed: (_busy || (!canReport && !canDispute)) ? null : () => _wrong(v),
+                  child: const Text('Something is wrong')),
             ]),
-            if (!canReport)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('You can report a no-show after the booking time has started.', style: t.labelSmall),
-              ),
           ],
         ]),
       ),

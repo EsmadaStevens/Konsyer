@@ -93,7 +93,8 @@ CREATE TABLE IF NOT EXISTS vouchers(
   auto_release_at TEXT, expires_at TEXT,
   paid_amount INTEGER NOT NULL DEFAULT 0, refunded_amount INTEGER NOT NULL DEFAULT 0,
   resolution TEXT, payout_ref TEXT, idem_key TEXT UNIQUE,
-  created_at TEXT NOT NULL, resolved_at TEXT);
+  created_at TEXT NOT NULL, resolved_at TEXT,
+  offer_slot_id INTEGER, offered_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_vouchers_user ON vouchers(user_id, state);
 CREATE TABLE IF NOT EXISTS disputes(
   id INTEGER PRIMARY KEY, voucher_id INTEGER NOT NULL REFERENCES vouchers(id),
@@ -128,6 +129,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     vcols = {r[1] for r in conn.execute("PRAGMA table_info(vouchers)")}
     if "source" not in vcols:  # where the seller's listing came from: merchant, flyer, screenshot or web_lead
         conn.execute("ALTER TABLE vouchers ADD COLUMN source TEXT")
+    for col, kind in (("offer_slot_id", "INTEGER"), ("offered_at", "TEXT")):  # a seller's offer of a new time
+        if col not in vcols:
+            conn.execute(f"ALTER TABLE vouchers ADD COLUMN {col} {kind}")
     dcols = {r[1] for r in conn.execute("PRAGMA table_info(disputes)")}
     for col, kind in (("seller_note", "TEXT"), ("contested_at", "TEXT"), ("escalated", "TEXT"), ("photo", "BLOB")):
         if dcols and col not in dcols:  # older databases: a contest is status 'open' plus contested_at
