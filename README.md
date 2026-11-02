@@ -118,6 +118,8 @@ The API's own documentation is at `http://localhost:8000/docs` while the backend
 
 **Escrow (sandbox).** When a verified business is booked, the money is held. If you cancel before the free-cancellation window closes, you get everything back; after it, the seller keeps the share set on the listing. The business is paid 30 minutes after the service ends unless you have opened a dispute. If the seller can't make the time, they can offer a new one: you accept it (same money, booking moved) or take a full refund with no fee. An unanswered offer never pays the seller; it turns into a refund when the original time arrives.
 
+**Why 30 minutes?** Many Zambian sellers live day to day, and an honest seller who delivered with no problem should not wait a day for their money. Waiting is the cost that makes sellers leave a platform. The customer's protection is that the money stays held until 30 minutes after the service ends, they can release it earlier with **I received it**, and they can dispute any time before then. The trade-off is real: a problem noticed hours later is outside the window (see the limits below). The window is a single setting in the code, so it can be changed per seller type later.
+
 **Disputes.** You can raise a photo claim while the money is still held (it is released 30 minutes after the service ends), with up to three tries. A clear mismatch opens a case: the seller has 48 hours to refund or contest. If they contest, or say nothing, a Konsyer admin decides. Only the admin can reject a claim, so a seller can never judge a claim against themselves, and a seller can never release the money to themselves while a claim is open. The photo is kept only while a case is open and deleted when it closes. If a listing description is too vague to check against (shorter than about 40 characters or 8 words), the photo check is skipped and a person decides.
 
 **Businesses.** A business registers and lists with real times and capacity. Konsyer verifies the business, then its listings go live. Price and description are locked once listed, because they are what disputes are judged against; the owner can add times, stop offering a listing (existing bookings are still honoured) and add a picture. Customers see the picture once the listing is verified.
@@ -134,6 +136,7 @@ The API's own documentation is at `http://localhost:8000/docs` while the backend
 ## Known limits
 
 - **The photo check is a recommendation, not a verdict.** Close shades can be flagged: in our testing, a very pale pink tip was called a mismatch against "white tips". That is why a person decides every case, and nothing is refunded by the model.
+- **The dispute window is short by design.** A problem that only shows up after the money is released (30 minutes after the service ends) cannot be disputed in this sandbox. A production version would need a longer window for some services, or a seller-funded appeal, and we have not built either.
 - The model sees the whole photo, including background; its description may mention things that don't matter.
 - Replay mode only covers recorded examples. The answers there are real model outputs recorded earlier.
 - Photos sent for checking go to the model provider, whose own retention applies. Konsyer deletes its copy when the case closes.
@@ -147,7 +150,14 @@ We tested giving the dispute model the seller's own listing picture as well as t
 
 Konsyer's value to a seller is demand and protection: customers who trust paying a stranger because the money is held. A small percentage fee on completed bookings, paid by the seller, is one way to charge for that. We have not tested whether sellers or customers would pay.
 
+## Why a standalone app first?
+
+Escrow, held payments, dispute evidence and business verification need a wallet and an audit trail that do not fit inside a chat bot alone. WhatsApp is planned as an entry channel (see the roadmap), not the system of record.
+
 ## Roadmap
+
+**Where we would start:** beauty services in Lusaka (for example nails and hair in Kabulonga and East Park), with a handful of salons, to test whether a prepaid customer who does not no-show is worth a fee to the seller. We have not run that test.
+
 
 - A WhatsApp channel through the Meta Cloud API, so the concierge works where people already chat.
 - An appeal to a senior person for disputes the first reviewer decided.
