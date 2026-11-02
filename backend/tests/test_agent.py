@@ -218,3 +218,26 @@ def test_solve_budget(conn):
 def test_estimate_ride_is_simulated(conn):
     r = Tools(conn, 1, TODAY).estimate_ride(lid(conn, "Braai"))
     assert r["simulated"] and r["price_ngwee"] > 0
+
+def test_prompt_lets_the_user_ask_for_a_web_search_next_to_registered_listings():
+    from app.agent.prompts import system_prompt
+    from app.timeutil import lusaka_today
+    assert "also search the web" in system_prompt(lusaka_today()).lower()
+
+
+def test_chat_offers_the_web_chip_only_after_a_listing_search_without_a_web_search(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main
+
+    monkeypatch.setenv("KONSYER_DB", str(tmp_path / "t.db"))
+    monkeypatch.setenv("LLM_API_KEY", "dummy")
+    monkeypatch.delenv("KONSYER_STUB", raising=False)
+
+    def fake(tools):
+        return lambda conn, uid, msg, hist: {"reply": "ok", "plan_id": None, "contacts": [],
+                                             "trace": [{"tool": t, "args": {}, "result": {}} for t in tools]}
+
+    client = TestClient(main.app)
+    for tools, expected in ((["search_listings"], True), (["search_listings", "discover_services"], False), ([], False)):
+        monkeypatch.setattr(main, "run_agent", fake(tools))
+        assert client.post("/chat", json={"message": "hi", "user_id": 1, "history": []}).json()["suggest_web"] is expected

@@ -168,7 +168,10 @@ def chat(body: ChatIn, conn=Depends(db)):
     lead_card = leads.card(conn, body.user_id, lead_ids)
     cards = ([card] if card else []) + ([lead_card] if lead_card else []) + \
         [contact_card(c) for c in r.get("contacts", [])]
+    tools_used = {t["tool"] for t in r["trace"]}
     return {"stub": False, "reply": r["reply"], "cards": cards,
+            # registered listings were searched but the web was not: offer a one-tap "also search the web"
+            "suggest_web": "search_listings" in tools_used and "discover_services" not in tools_used,
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
 
 

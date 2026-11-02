@@ -29,7 +29,8 @@ class Msg {
   final bool fromUser;
   final String text;
   final List<Map<String, dynamic>> cards;
-  Msg(this.fromUser, this.text, [this.cards = const []]);
+  final bool suggestWeb; // offer a one-tap "Also search the web"
+  Msg(this.fromUser, this.text, [this.cards = const [], this.suggestWeb = false]);
 }
 
 class ChatScreen extends StatefulWidget {
@@ -46,8 +47,8 @@ class _ChatScreenState extends State<ChatScreen> {
   ];
   bool _loading = false;
 
-  Future<void> _send() async {
-    final text = _ctrl.text.trim();
+  Future<void> _send([String? override]) async {
+    final text = (override ?? _ctrl.text).trim();
     if (text.isEmpty || _loading) return;
     // The last few messages (text only) so the agent remembers what was said; cards are not sent.
     final said = _msgs.where((m) => m.text.trim().isNotEmpty).toList();
@@ -63,7 +64,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final j = await apiPost('/chat', {'user_id': userId, 'message': text, 'history': history});
       final cards = (j['cards'] as List? ?? []).cast<Map<String, dynamic>>();
-      setState(() => _msgs.add(Msg(false, j['reply'] as String? ?? '', cards)));
+      setState(() => _msgs.add(Msg(false, j['reply'] as String? ?? '', cards, j['suggest_web'] == true)));
     } catch (e) {
       setState(() => _msgs.add(Msg(false, 'Could not reach the server: $e')));
     } finally {
@@ -112,6 +113,18 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         if (_loading) const LinearProgressIndicator(minHeight: 2),
+        if (!_loading && _msgs.isNotEmpty && _msgs.last.suggestWeb)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: ActionChip(
+                avatar: const Icon(Icons.travel_explore, size: 18),
+                label: const Text('Also search the web'),
+                onPressed: () => _send('Also search the web for this.'),
+              ),
+            ),
+          ),
         SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
