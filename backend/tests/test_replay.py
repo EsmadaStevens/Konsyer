@@ -180,3 +180,10 @@ def test_the_recording_script_records_every_scenario_and_the_result_replays(monk
     monkeypatch.setenv("KONSYER_REPLAY", str(out))
     got = llm.chat(say(record_demo.SCENARIOS[0]))
     assert got["message"]["content"] == "A recorded reply."
+
+
+def test_replay_mode_never_searches_the_web(monkeypatch):
+    from app import discovery
+    monkeypatch.setenv("DISCOVERY_PROVIDER", "meta")
+    monkeypatch.setenv("KONSYER_REPLAY", "demo/trace.jsonl")
+    assert discovery.get_provider().__class__.__name__ == "MockDiscovery"
