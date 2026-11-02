@@ -91,7 +91,7 @@ def _approve_locked(conn, user_id, action_id, today):
     if kind == "book_listing":
         listing = conn.execute("SELECT * FROM listings WHERE id=?", (payload["listing_id"],)).fetchone()
         slot = conn.execute("SELECT * FROM slots WHERE id=?", (payload["slot_id"],)).fetchone()
-        if not listing or not slot or listing["price"] is None:
+        if not listing or not slot or listing["price"] is None or listing["paused"]:
             return _fail(conn, user_id, action_id, "This listing is no longer available.")
         amount = listing["price"] * payload["qty"]  # recomputed from the database
         if amount != row["amount"]:

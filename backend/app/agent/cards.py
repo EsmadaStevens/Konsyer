@@ -17,8 +17,11 @@ def plan_card(conn, plan_id):
                       "time": to_local(t).strftime("%H:%M") if t else "", "amount": r["amount"],
                       "decision": r["policy_decision"], "reason": r["policy_reason"], "status": r["status"]})
         if p.get("listing_id"):
-            row = conn.execute("SELECT is_sample FROM listings WHERE id=?", (p["listing_id"],)).fetchone()
+            row = conn.execute("SELECT is_sample, status, photo IS NOT NULL AS has_photo FROM listings WHERE id=?",
+                               (p["listing_id"],)).fetchone()
             sample = sample or bool(row and row["is_sample"])
+            if row and row["has_photo"] and row["status"] == "verified":  # the seller's own picture, for people
+                items[-1]["photo_url"] = f"/listings/{p['listing_id']}/photo"
     items.sort(key=lambda i: i["time_utc"])
     total = sum(i["amount"] for i in items if i["status"] != "denied")
     for i in items:

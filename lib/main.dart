@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '/screens/activity_screen.dart';
 import '/screens/admin_screen.dart';
@@ -29,7 +30,8 @@ class Msg {
   final bool fromUser;
   final String text;
   final List<Map<String, dynamic>> cards;
-  Msg(this.fromUser, this.text, [this.cards = const []]);
+  final bool suggestWeb; // offer a one-tap "Also search the web"
+  Msg(this.fromUser, this.text, [this.cards = const [], this.suggestWeb = false]);
 }
 
 class ChatScreen extends StatefulWidget {
@@ -42,12 +44,87 @@ class _ChatScreenState extends State<ChatScreen> {
   final _ctrl = TextEditingController();
   final _scroll = ScrollController();
   final List<Msg> _msgs = [
-    Msg(false, 'Hi! Tell me what you want to do, your budget and group size, and I will plan it.'),
+    Msg(false, _greeting),
   ];
   bool _loading = false;
+  Timer? _timer;
+  int _attnCount = 0;
+  List<Map<String, dynamic>> _attn = [];
 
-  Future<void> _send() async {
-    final text = _ctrl.text.trim();
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+    _loadAttention();
+    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _loadAttention());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  static const _greeting = 'Hi! Tell me what you want to do, your budget and group size, and I will plan it.';
+
+  /// The conversation is kept on the server, so a reload picks up where you left off.
+  Future<void> _loadHistory() async {
+    try {
+      final j = await apiGet('/chat/history?user_id=$userId');
+      final rows = ((j['messages'] as List?) ?? []).cast<Map<String, dynamic>>();
+      if (!mounted || rows.isEmpty) return;
+      setState(() {
+        _msgs
+          ..clear()
+          ..add(Msg(false, _greeting))
+          ..addAll([
+            for (final r in rows)
+              Msg(r['from_user'] == true, (r['text'] ?? '').toString(),
+                  ((r['cards'] as List?) ?? []).cast<Map<String, dynamic>>(), r['suggest_web'] == true)
+          ]);
+      });
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    } catch (_) {
+      // a fresh conversation is fine if the history cannot be loaded
+    }
+  }
+
+  Future<void> _newChat() async {
+    try {
+      await apiPost('/chat/clear', {'user_id': userId});
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _msgs
+        ..clear()
+        ..add(Msg(false, _greeting));
+    });
+  }
+
+  /// Offers, claims waiting for a reply and fresh decisions, so nobody has to dig through screens to find them.
+  Future<void> _loadAttention() async {
+    try {
+      final j = await apiGet('/attention?user_id=$userId');
+      if (!mounted) return;
+      setState(() {
+        _attnCount = (j['count'] as num? ?? 0).toInt();
+        _attn = ((j['items'] as List?) ?? []).cast<Map<String, dynamic>>();
+      });
+    } catch (_) {
+      // the banner is a convenience: stay quiet if the server is busy
+    }
+  }
+
+  Future<void> _open(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    _loadAttention();
+  }
+
+  Future<void> _send([String? override]) async {
+    final text = (override ?? _ctrl.text).trim();
     if (text.isEmpty || _loading) return;
     // The last few messages (text only) so the agent remembers what was said; cards are not sent.
     final said = _msgs.where((m) => m.text.trim().isNotEmpty).toList();
@@ -63,11 +140,12 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final j = await apiPost('/chat', {'user_id': userId, 'message': text, 'history': history});
       final cards = (j['cards'] as List? ?? []).cast<Map<String, dynamic>>();
-      setState(() => _msgs.add(Msg(false, j['reply'] as String? ?? '', cards)));
+      setState(() => _msgs.add(Msg(false, j['reply'] as String? ?? '', cards, j['suggest_web'] == true)));
     } catch (e) {
       setState(() => _msgs.add(Msg(false, 'Could not reach the server: $e')));
     } finally {
       setState(() => _loading = false);
+      _loadAttention();
       await Future.delayed(const Duration(milliseconds: 50));
       if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent + 200,
@@ -82,23 +160,24 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('Konsyer'),
         actions: [
+          IconButton(tooltip: 'New chat', icon: const Icon(Icons.add_comment_outlined), onPressed: _newChat),
           IconButton(
             tooltip: 'For businesses',
             icon: const Icon(Icons.storefront_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const MerchantScreen())),
+            onPressed: () => _open(const MerchantScreen()),
           ),
           IconButton(
             tooltip: 'Activity: what the models did',
             icon: const Icon(Icons.timeline_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
+            onPressed: () => _open(const ActivityScreen()),
           ),
           IconButton(
             tooltip: 'Wallet',
-            icon: const Icon(Icons.account_balance_wallet_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const WalletScreen())),
+            icon: Badge(
+                isLabelVisible: _attnCount > 0,
+                label: Text('$_attnCount'),
+                child: const Icon(Icons.account_balance_wallet_outlined)),
+            onPressed: () => _open(const WalletScreen()),
           ),
         ],
       ),
@@ -111,7 +190,46 @@ class _ChatScreenState extends State<ChatScreen> {
             itemBuilder: (_, i) => _Bubble(_msgs[i]),
           ),
         ),
+        if (_attn.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Card(
+              margin: EdgeInsets.zero,
+              color: Theme.of(context).colorScheme.primaryContainer.withAlpha(90),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _open(_attn.first['target'] == 'business' ? const MerchantScreen() : const VouchersScreen()),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(children: [
+                    Icon(_attn.first['kind'] == 'action' ? Icons.notifications_active_outlined : Icons.info_outline,
+                        size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Text(
+                            _attn.length > 1
+                                ? '${_attn.first['text']}  (+${_attn.length - 1} more)'
+                                : '${_attn.first['text']}',
+                            style: Theme.of(context).textTheme.bodySmall)),
+                    const Icon(Icons.chevron_right),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         if (_loading) const LinearProgressIndicator(minHeight: 2),
+        if (!_loading && _msgs.isNotEmpty && _msgs.last.suggestWeb)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: ActionChip(
+                avatar: const Icon(Icons.travel_explore, size: 18),
+                label: const Text('Also search the web'),
+                onPressed: () => _send('Also search the web for this.'),
+              ),
+            ),
+          ),
         SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -244,6 +362,16 @@ class _PlanCardState extends State<PlanCard> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           SizedBox(width: 48, child: Text((i['time'] ?? '').toString())),
+          if (i['photo_url'] != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.network('$apiBase${i['photo_url']}',
+                    width: 56, height: 56, fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => const SizedBox(width: 56, height: 56)),
+              ),
+            ),
           Expanded(child: Text((i['label'] ?? '').toString())),
           Text(fmtK((i['amount'] as num).toInt())),
         ]),

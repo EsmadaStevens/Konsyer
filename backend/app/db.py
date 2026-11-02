@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS listings(
   status TEXT NOT NULL DEFAULT 'unverified' CHECK(status IN ('unverified','claimed','verified')),
   trust_score REAL NOT NULL DEFAULT 0.3,
   contact_whatsapp TEXT, source_url TEXT, fetched_at TEXT,
-  is_sample INTEGER NOT NULL DEFAULT 0);
+  is_sample INTEGER NOT NULL DEFAULT 0, photo BLOB, paused INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS slots(
   id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL REFERENCES listings(id),
   starts_at TEXT NOT NULL, ends_at TEXT, capacity INTEGER NOT NULL DEFAULT 1, booked INTEGER NOT NULL DEFAULT 0);
@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS audit_log(
 CREATE TABLE IF NOT EXISTS model_calls(
   id INTEGER PRIMARY KEY, job TEXT NOT NULL, model TEXT NOT NULL, ok INTEGER NOT NULL, ms INTEGER NOT NULL,
   note TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS chat_messages(
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+  text TEXT NOT NULL, cards TEXT NOT NULL DEFAULT '[]', plan_id INTEGER, suggest_web INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_messages(user_id, id);
 CREATE TABLE IF NOT EXISTS reminders(
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), plan_id INTEGER REFERENCES plans(id),
   fire_at TEXT NOT NULL, text TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0);
@@ -139,6 +144,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     lcols = {r[1] for r in conn.execute("PRAGMA table_info(listings)")}
     if "cancel_free_hours" not in lcols:  # deposit policy, fixed per listing: free cancellation window
         conn.execute("ALTER TABLE listings ADD COLUMN cancel_free_hours INTEGER NOT NULL DEFAULT 24")
+    if "paused" not in lcols:  # the owner stopped offering it: hidden from customers, existing bookings are honoured
+        conn.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
+    if "photo" not in lcols:  # the seller's own picture of the listing (verified businesses only)
+        conn.execute("ALTER TABLE listings ADD COLUMN photo BLOB")
     if "late_forfeit_pct" not in lcols:   # share of the held money the seller keeps after a late cancel
         conn.execute("ALTER TABLE listings ADD COLUMN late_forfeit_pct INTEGER NOT NULL DEFAULT 50")
 

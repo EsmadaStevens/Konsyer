@@ -8,7 +8,7 @@ import re
 from datetime import date, datetime, timedelta
 
 from .contact import is_http_url
-from .flyers import MAX_PRICE, TYPES, normalize_phone
+from .flyers import MAX_PRICE, TYPES, detect_image, normalize_phone
 from .specificity import ADVICE, is_specific
 from .timeutil import LUSAKA, to_utc_iso
 
@@ -139,7 +139,8 @@ def get_merchant(conn, user_id, merchant_id):
     m = conn.execute("SELECT * FROM merchants WHERE id=?", (merchant_id,)).fetchone()
     if m is None or m["owner_user_id"] != user_id:
         raise MerchantError("not_found", "Merchant not found.")
-    rows = conn.execute("SELECT id, name, type, price, status FROM listings WHERE merchant_id=? ORDER BY id",
+    rows = conn.execute("SELECT id, name, type, price, status, paused, photo IS NOT NULL AS has_photo FROM listings "
+                        "WHERE merchant_id=? ORDER BY id",
                         (merchant_id,)).fetchall()
     return {"merchant_id": m["id"], "name": m["name"], "area": m["area"], "whatsapp": m["whatsapp"],
             "social_url": m["social_url"], "verified": bool(m["verified"]), "listings": [dict(r) for r in rows]}
@@ -158,8 +159,9 @@ def admin_list(conn):
         counts = {r["status"]: r["n"] for r in conn.execute(
             "SELECT status, COUNT(*) AS n FROM listings WHERE merchant_id=? GROUP BY status", (m["id"],))}
         pending = [{"listing_id": r["id"], "title": r["name"], "description": r["description"] or "",
-                    "price": r["price"], "photo_checked": is_specific(r["description"])}
-                   for r in conn.execute("SELECT id, name, description, price FROM listings "
+                    "price": r["price"], "photo_checked": is_specific(r["description"]),
+                    "has_photo": bool(r["has_photo"])}
+                   for r in conn.execute("SELECT id, name, description, price, photo IS NOT NULL AS has_photo FROM listings "
                                          "WHERE merchant_id=? AND status='claimed' ORDER BY id", (m["id"],))]
         out.append({"merchant_id": m["id"], "name": m["name"], "area": m["area"], "whatsapp": m["whatsapp"],
                     "pending_listings": pending,
@@ -187,3 +189,86 @@ def verify(conn, merchant_id):
         conn.rollback()
         raise
     return {"merchant_id": merchant_id, "verified": True, "listings_verified": n}
+
+# ---------- the seller's own picture of a listing ----------
+MAX_LISTING_PHOTO = 3 * 1024 * 1024
+
+
+def _own_listing(conn, user_id, listing_id):
+    r = conn.execute("SELECT l.id, l.name, l.status, m.owner_user_id, m.verified FROM listings l "
+                     "JOIN merchants m ON m.id=l.merchant_id WHERE l.id=?", (listing_id,)).fetchone()
+    if r is None or r["owner_user_id"] != user_id:
+        raise MerchantError("not_found", "Listing not found.")
+    return r
+
+
+def set_photo(conn, user_id, listing_id, data):
+    """A verified business attaches one picture of what it offers. Customers see it only once the listing is verified
+    (so Konsyer has looked at it). No model reads it; it is just a picture for people."""
+    r = _own_listing(conn, user_id, listing_id)
+    if not r["verified"]:
+        raise MerchantError("forbidden", "Pictures can be added once Konsyer has verified your business.")
+    if not data or len(data) > MAX_LISTING_PHOTO:
+        raise MerchantError("invalid", "The picture must be an image under 3 MB.")
+    if detect_image(data) is None:
+        raise MerchantError("invalid", "Use a JPG, PNG or WebP picture.")
+    conn.execute("UPDATE listings SET photo=? WHERE id=?", (data, listing_id))
+    conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                 (user_id, "listing_photo_set", f"A picture was attached to '{r['name']}'.", "merchant_listing_photo"))
+    conn.commit()
+    return {"listing_id": listing_id, "has_photo": True}
+
+
+def remove_photo(conn, user_id, listing_id):
+    _own_listing(conn, user_id, listing_id)
+    conn.execute("UPDATE listings SET photo=NULL WHERE id=?", (listing_id,))
+    conn.commit()
+    return {"listing_id": listing_id, "has_photo": False}
+
+
+def get_photo(conn, listing_id, user_id=None, admin=False):
+    """Public only for a verified listing. The owner and an admin can also see it before verification."""
+    r = conn.execute("SELECT l.status, l.photo, m.owner_user_id FROM listings l "
+                     "LEFT JOIN merchants m ON m.id=l.merchant_id WHERE l.id=?", (listing_id,)).fetchone()
+    if r is None or r["photo"] is None:
+        raise MerchantError("not_found", "No picture.")
+    if not (admin or r["status"] == "verified" or (user_id is not None and r["owner_user_id"] == user_id)):
+        raise MerchantError("not_found", "No picture.")
+    return bytes(r["photo"]), detect_image(bytes(r["photo"]))
+
+
+# ---------- running a live listing: add times, pause ----------
+MAX_TOTAL_SLOTS = 60
+
+
+def add_slots(conn, user_id, listing_id, slots, today):
+    """More times for an existing listing. Price and description stay locked: they are what a customer's photo
+    check is judged against, so they cannot change after people have booked."""
+    r = _own_listing(conn, user_id, listing_id)
+    slots = slots or []
+    if not 1 <= len(slots) <= MAX_SLOTS:
+        raise MerchantError("invalid", f"Add between 1 and {MAX_SLOTS} times at once.")
+    have = conn.execute("SELECT COUNT(*) FROM slots WHERE listing_id=?", (listing_id,)).fetchone()[0]
+    if have + len(slots) > MAX_TOTAL_SLOTS:
+        raise MerchantError("invalid", f"A listing can have at most {MAX_TOTAL_SLOTS} times.")
+    parsed = [_parse_slot(s, today, i + 1) for i, s in enumerate(slots)]
+    for st, en, cap in parsed:
+        conn.execute("INSERT INTO slots(listing_id, starts_at, ends_at, capacity, booked) VALUES (?,?,?,?,0)",
+                     (listing_id, st, en, cap))
+    conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                 (user_id, "listing_times_added", f"{len(parsed)} time(s) were added to '{r['name']}'.",
+                  "merchant_listing_times"))
+    conn.commit()
+    return {"listing_id": listing_id, "added": len(parsed)}
+
+
+def set_paused(conn, user_id, listing_id, paused):
+    """Stop (or resume) offering something. Existing bookings are still honoured: the business can serve them,
+    offer another time or cancel with a full refund."""
+    r = _own_listing(conn, user_id, listing_id)
+    conn.execute("UPDATE listings SET paused=? WHERE id=?", (1 if paused else 0, listing_id))
+    conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                 (user_id, "listing_paused" if paused else "listing_resumed",
+                  f"'{r['name']}' was {'paused' if paused else 'resumed'} by its owner.", "merchant_listing_pause"))
+    conn.commit()
+    return {"listing_id": listing_id, "paused": bool(paused)}

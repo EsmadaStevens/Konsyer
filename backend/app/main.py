@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import activity, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
+from . import activity, attention, chat_store, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -124,6 +124,16 @@ class SlotIn(BaseModel):
     capacity: int = 1
 
 
+class AddTimesIn(BaseModel):
+    user_id: int = 1
+    slots: list[SlotIn]
+
+
+class PauseIn(BaseModel):
+    user_id: int = 1
+    paused: bool = True
+
+
 class MerchantListingIn(BaseModel):
     user_id: int = 1
     title: str
@@ -168,8 +178,23 @@ def chat(body: ChatIn, conn=Depends(db)):
     lead_card = leads.card(conn, body.user_id, lead_ids)
     cards = ([card] if card else []) + ([lead_card] if lead_card else []) + \
         [contact_card(c) for c in r.get("contacts", [])]
-    return {"stub": False, "reply": r["reply"], "cards": cards,
+    tools_used = {t["tool"] for t in r["trace"]}
+    # registered listings were searched but the web was not: offer a one-tap "also search the web"
+    suggest_web = "search_listings" in tools_used and "discover_services" not in tools_used
+    chat_store.save_exchange(conn, body.user_id, body.message, r["reply"], cards, r["plan_id"], suggest_web)
+    return {"stub": False, "reply": r["reply"], "cards": cards, "suggest_web": suggest_web,
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
+
+
+@app.get("/chat/history")
+def chat_history(user_id: int = 1, conn=Depends(db)):
+    return {"messages": chat_store.history(conn, user_id)}
+
+
+@app.post("/chat/clear")
+def chat_clear(body: ActionIn, conn=Depends(db)):
+    chat_store.clear(conn, body.user_id)
+    return {"ok": True}
 
 
 # ---------- wallet (sandbox money, not real funds) ----------
@@ -296,6 +321,38 @@ def get_merchant(merchant_id: int, user_id: int = 1, conn=Depends(db)):
     return _merchant_call(merchants.get_merchant, conn, user_id, merchant_id)
 
 
+@app.post("/listings/{listing_id}/slots")
+def add_listing_times(listing_id: int, body: AddTimesIn, conn=Depends(db)):
+    return _merchant_call(merchants.add_slots, conn, body.user_id, listing_id,
+                          [x.model_dump() for x in body.slots], lusaka_today())
+
+
+@app.post("/listings/{listing_id}/pause")
+def pause_listing(listing_id: int, body: PauseIn, conn=Depends(db)):
+    return _merchant_call(merchants.set_paused, conn, body.user_id, listing_id, body.paused)
+
+
+@app.post("/listings/{listing_id}/photo")
+def set_listing_photo(listing_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
+    data = image.file.read(merchants.MAX_LISTING_PHOTO + 1)
+    return _merchant_call(merchants.set_photo, conn, user_id, listing_id, data)
+
+
+@app.post("/listings/{listing_id}/photo/remove")
+def remove_listing_photo(listing_id: int, body: ActionIn, conn=Depends(db)):
+    return _merchant_call(merchants.remove_photo, conn, body.user_id, listing_id)
+
+
+@app.get("/listings/{listing_id}/photo")
+def listing_photo(listing_id: int, user_id: int = 0, x_admin_key: str = Header(default=""), conn=Depends(db)):
+    """Public for a verified listing; the owner and an admin can also see it earlier."""
+    expected = os.environ.get("KONSYER_ADMIN_KEY", "")
+    admin = bool(expected) and hmac.compare_digest(x_admin_key.encode(), expected.encode())
+    data, ext = _merchant_call(merchants.get_photo, conn, listing_id, user_id or None, admin)
+    return Response(content=data, media_type={".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+                    .get(ext, "application/octet-stream"), headers={"Cache-Control": "no-store"})
+
+
 @app.post("/admin/merchants/{merchant_id}/verify")
 def verify_merchant(merchant_id: int, x_admin_key: str = Header(default=""), conn=Depends(db)):
     _require_admin(x_admin_key)
@@ -314,6 +371,11 @@ def _escrow_call(fn, *args, **kw):
         return fn(*args, **kw)
     except escrow.EscrowError as e:
         raise HTTPException(status_code=escrow.STATUS.get(e.code, 400), detail=e.message)
+
+
+@app.get("/attention")
+def my_attention(user_id: int = 1, conn=Depends(db)):
+    return _escrow_call(attention.for_user, conn, user_id)
 
 
 @app.get("/vouchers")

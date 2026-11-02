@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../dispute_card.dart';
+import '../photo_thumb.dart';
 
 /// Konsyer admin: verify businesses and decide photo reviews. The admin key is typed here each time and never saved.
 /// A production version would live behind real admin sign-in, not in the customer app.
@@ -163,7 +164,14 @@ class _AdminScreenState extends State<AdminScreen> {
                 decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(120),
                     borderRadius: BorderRadius.circular(8)),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  if (l['has_photo'] == true) ...[
+                    PhotoThumb(
+                        size: 72,
+                        load: () => apiGetBytes('/listings/${l['listing_id']}/photo', headers: _headers)),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('${l['title']}  -  ${fmtK((l['price'] as num).toInt())}', style: t.titleSmall),
                   Text((l['description'] ?? '').toString().isEmpty ? 'No description.' : l['description'].toString(),
                       style: t.bodySmall),
@@ -171,6 +179,7 @@ class _AdminScreenState extends State<AdminScreen> {
                           ? 'Photo check: on (the description is specific).'
                           : 'Photo check: off (too vague, so disputes go straight to a person).',
                       style: t.labelSmall),
+                  ])),
                 ]),
               ),
             ),

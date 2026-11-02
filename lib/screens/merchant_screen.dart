@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api.dart';
 import '../dispute_card.dart';
+import '../photo_thumb.dart';
 
 String? _orNull(String s) => s.trim().isEmpty ? null : s.trim();
 
@@ -87,6 +89,26 @@ class _MerchantScreenState extends State<MerchantScreen> {
     final added = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => ListingFormScreen(merchant: merchant!)));
     if (added == true) _load();
+  }
+
+  int _photoVersion = 0;
+
+  /// A verified business can attach one picture of what it offers. Customers see it once the listing is verified.
+  Future<void> _changePhoto(Map<String, dynamic> l) async {
+    try {
+      final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 85);
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      setState(() => busy = true);
+      await apiUpload('/listings/${l['id']}/photo', {'user_id': '$userId'}, bytes, x.name);
+      _photoVersion++;
+      _toast('Picture added. Customers see it once the listing is verified.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> _bookingAction(Map<String, dynamic> v, String verb, String done) async {
@@ -311,14 +333,50 @@ class _MerchantScreenState extends State<MerchantScreen> {
     ]);
   }
 
-  Widget _statusChip(String status) {
-    final live = status == 'verified';
+  Widget _statusChip(String status, {bool paused = false}) {
+    final live = status == 'verified' && !paused;
     final cs = Theme.of(context).colorScheme;
     return Chip(
-      label: Text(live ? 'Live' : 'Awaiting verification'),
+      label: Text(paused ? 'Not offered' : (live ? 'Live' : 'Awaiting verification')),
       visualDensity: VisualDensity.compact,
       backgroundColor: live ? Colors.green.withAlpha(60) : cs.surfaceContainerHighest,
     );
+  }
+
+  Future<void> _addTimes(Map<String, dynamic> l) async {
+    final added = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => ListingFormScreen(merchant: merchant!, addTo: l)));
+    if (added == true) _load();
+  }
+
+  /// Stop offering something. Customers stop seeing it; bookings already made stay and are honoured.
+  Future<void> _togglePause(Map<String, dynamic> l) async {
+    final paused = l['paused'] == 1 || l['paused'] == true;
+    if (!paused) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('Stop offering ${l['name']}?'),
+          content: const Text('Customers will no longer see it or be able to book it. Bookings already made stay: '
+              'serve them, offer another time, or cancel with a full refund. You can resume it any time.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep offering')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Stop offering')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    setState(() => busy = true);
+    try {
+      await apiPost('/listings/${l['id']}/pause', {'user_id': userId, 'paused': !paused});
+      _toast(paused ? 'Resumed. Customers can see it again.' : 'Stopped. Customers no longer see it.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Widget _dashboard() {
@@ -349,12 +407,30 @@ class _MerchantScreenState extends State<MerchantScreen> {
         const Divider(),
         if (listings.isEmpty) const Text('No listings yet.'),
         for (final l in listings)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(l['name'].toString()),
-            subtitle: Text('${l['type']} - ${fmtK((l['price'] as num).toInt())}'),
-            trailing: _statusChip(l['status'].toString()),
-          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: l['has_photo'] == true
+                  ? PhotoThumb(
+                      key: ValueKey('p${l['id']}-$_photoVersion'),
+                      load: () => apiGetBytes('/listings/${l['id']}/photo?user_id=$userId'))
+                  : null,
+              title: Text(l['name'].toString()),
+              subtitle: Text('${l['type']} - ${fmtK((l['price'] as num).toInt())}'),
+              trailing: _statusChip(l['status'].toString(), paused: l['paused'] == 1 || l['paused'] == true),
+            ),
+            Wrap(spacing: 4, children: [
+              TextButton(onPressed: busy ? null : () => _addTimes(l), child: const Text('Add times')),
+              if (m['verified'] == true)
+                TextButton(
+                    onPressed: busy ? null : () => _changePhoto(l),
+                    child: Text(l['has_photo'] == true ? 'Change photo' : 'Add photo')),
+              TextButton(
+                  onPressed: busy ? null : () => _togglePause(l),
+                  child: Text(l['paused'] == 1 || l['paused'] == true ? 'Resume' : 'Stop offering')),
+            ]),
+            const Divider(height: 8),
+          ]),
         const SizedBox(height: 16),
         Text('Customer bookings (payment held in escrow)', style: t.titleSmall),
         const Divider(),
@@ -391,7 +467,9 @@ class _SlotFields {
 /// One listing with one or more time slots. Capacity is the real number of places per slot.
 class ListingFormScreen extends StatefulWidget {
   final Map<String, dynamic> merchant;
-  const ListingFormScreen({super.key, required this.merchant});
+  /// When set, only new times are added to this existing listing (price and description stay locked).
+  final Map<String, dynamic>? addTo;
+  const ListingFormScreen({super.key, required this.merchant, this.addTo});
   @override
   State<ListingFormScreen> createState() => _ListingFormScreenState();
 }
@@ -406,6 +484,10 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
   final _price = TextEditingController();
   final List<_SlotFields> _slots = [_SlotFields()];
   List<String> _tags = [];
+  List<int>? _picture; // the listing picture (verified businesses only)
+  String _pictureName = 'listing.jpg';
+  bool get _canPicture => widget.merchant['verified'] == true;
+  bool get _adding => widget.addTo != null;
   List<String> _check = [];
   String? _advice;
 
@@ -427,6 +509,10 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
       if (x == null) return;
       final bytes = await x.readAsBytes();
       setState(() => _busy = true);
+      if (kind == 'photo' && _canPicture) {
+        _picture = bytes; // the same photo can be the listing picture; the owner can remove it below
+        _pictureName = x.name;
+      }
       final j = await apiUpload('/merchants/${widget.merchant['merchant_id']}/draft-from-$kind',
           {'user_id': '$userId'}, bytes, x.name);
       final price = j['price_ngwee'];
@@ -455,9 +541,9 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
   }
 
   Future<void> _submit() async {
-    if (_title.text.trim().isEmpty) return _toast('Enter a title.');
+    if (!_adding && _title.text.trim().isEmpty) return _toast('Enter a title.');
     final price = double.tryParse(_price.text.trim().replaceAll(',', ''));
-    if (price == null || price <= 0) return _toast('Price must be a number in kwacha, more than zero.');
+    if (!_adding && (price == null || price <= 0)) return _toast('Price must be a number in kwacha, more than zero.');
     final slots = <Map<String, dynamic>>[];
     for (var i = 0; i < _slots.length; i++) {
       final s = _slots[i];
@@ -474,18 +560,33 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
     }
     setState(() => _busy = true);
     try {
+      if (_adding) {
+        await apiPost('/listings/${widget.addTo!['id']}/slots', {'user_id': userId, 'slots': slots});
+        _toast('Times added.');
+        if (mounted) Navigator.of(context).pop(true);
+        return;
+      }
       final j = await apiPost('/merchants/${widget.merchant['merchant_id']}/listings', {
         'user_id': userId,
         'title': _title.text.trim(),
         'listing_type': _type,
         'description': _orNull(_desc.text),
         'area': _orNull(_area.text),
-        'price_ngwee': (price * 100).round(),
+        'price_ngwee': (price! * 100).round(),
         'serves_alcohol': _alcohol,
         'tags': _tags,
         'slots': slots,
       });
-      _toast(j['message']?.toString() ?? 'Submitted.');
+      final pic = _picture;
+      var msg = j['message']?.toString() ?? 'Submitted.';
+      if (pic != null && _canPicture && j['listing_id'] != null) {
+        try {
+          await apiUpload('/listings/${j['listing_id']}/photo', {'user_id': '$userId'}, pic, _pictureName);
+        } catch (e) {
+          msg = '$msg The picture was not saved: $e';
+        }
+      }
+      _toast(msg);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       _toast('$e');
@@ -609,8 +710,9 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add a listing')),
+      appBar: AppBar(title: Text(_adding ? 'Add times: ${widget.addTo!['name']}' : 'Add a listing')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        if (!_adding) ...[
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -678,6 +780,37 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
                 labelText: 'Price per person (kwacha)', prefixText: 'K ', border: OutlineInputBorder())),
+        if (_canPicture)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(children: [
+              if (_picture != null)
+                ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(Uint8List.fromList(_picture!), width: 56, height: 56, fit: BoxFit.cover)),
+              if (_picture != null) const SizedBox(width: 10),
+              Expanded(
+                  child: Text(_picture == null
+                      ? 'Listing picture (optional). Customers see it once Konsyer verifies the listing.'
+                      : 'This picture will show on your listing.',
+                      style: Theme.of(context).textTheme.bodySmall)),
+              TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          if (_picture != null) return setState(() => _picture = null);
+                          final x = await ImagePicker()
+                              .pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 85);
+                          if (x == null) return;
+                          final b = await x.readAsBytes();
+                          setState(() {
+                            _picture = b;
+                            _pictureName = x.name;
+                          });
+                        },
+                  child: Text(_picture == null ? 'Add picture' : 'Remove')),
+            ]),
+          ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Alcohol is served'),
@@ -685,6 +818,7 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
           value: _alcohol,
           onChanged: (v) => setState(() => _alcohol = v),
         ),
+        ],
         const SizedBox(height: 8),
         for (var i = 0; i < _slots.length; i++) _slotRow(i),
         if (_slots.length < _maxSlots)
@@ -693,7 +827,9 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
               icon: const Icon(Icons.add),
               label: const Text('Add another time')),
         const SizedBox(height: 12),
-        FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'Working...' : 'Submit listing')),
+        FilledButton(
+            onPressed: _busy ? null : _submit,
+            child: Text(_busy ? 'Working...' : (_adding ? 'Add these times' : 'Submit listing'))),
         const SizedBox(height: 8),
         Text('Your listing appears to customers after Konsyer verifies your business.',
             style: Theme.of(context).textTheme.labelSmall),
