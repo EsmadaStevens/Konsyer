@@ -49,6 +49,8 @@ app.*.map.json
 
 # Konsyer
 images/
+# ...except the licensed demo photos (and their credits) that the keyless replay needs
+!backend/demo/images/
 .env
 *.env
 backend/.venv/
