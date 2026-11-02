@@ -1,6 +1,7 @@
 """Record the model's answers for the keyless demo. Run this ONCE, with your keys, on your own machine.
 
     python -m scripts.record_demo --out demo/trace.jsonl
+    python -m scripts.record_demo --out demo/trace.jsonl --skip-chat --dispute-photo "demo/images/pink_tips_remote.jpg"
     python -m scripts.record_demo --out demo/trace.jsonl ^
         --dispute-photo "demo/images/red_nails.jpg" --dispute-photo "demo/images/french_tips.jpg" ^
         --product-photo "demo/images/braids.jpg" --flyer "demo/images/flyer.jpg" --extra "a cheap lunch for two"
@@ -36,6 +37,9 @@ def main():
     ap.add_argument("--listing-text", default=None, help="listing text for the dispute photos (default: press-on nails)")
     ap.add_argument("--product-photo", action="append", default=[], help="a product photo to draft a listing from")
     ap.add_argument("--flyer", action="append", default=[], help="a flyer to read")
+    ap.add_argument("--skip-chat", action="store_true",
+                    help="record only the photos given (use this to ADD pictures to an existing trace without "
+                         "recording the chat examples a second time)")
     a = ap.parse_args()
 
     os.environ["DISCOVERY_PROVIDER"] = "mock"          # sample leads only: nothing real in the recording
@@ -65,7 +69,7 @@ def main():
     conn.commit()
 
     done = failed = 0
-    for text in SCENARIOS + a.extra:
+    for text in ([] if a.skip_chat else SCENARIOS) + a.extra:
         try:
             r = run_agent(conn, 1, text, [])
             print(f"ok   {text!r}\n     -> {r['reply'][:110]!r}")
