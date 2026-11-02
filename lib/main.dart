@@ -17,12 +17,6 @@ class ConciergeApp extends StatelessWidget {
         title: 'Konsyer',
         debugShowCheckedModeBanner: false,
         theme: K.theme(),
-        // On a wide screen the app sits in a readable centred column; on a phone this changes nothing.
-        builder: (context, child) => ColoredBox(
-            color: K.bg,
-            child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: K.maxWidth), child: child))),
         home: const ChatScreen(),
         // The admin console is a separate address (open /#/admin in its own tab), not part of the customer app.
         routes: {'/admin': (_) => const AdminScreen()},
