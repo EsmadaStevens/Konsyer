@@ -165,7 +165,7 @@ class Tools:
         tagset = [t.lower() for t in (tags or []) if isinstance(t, str)]
         found = []
         for r in self.conn.execute("SELECT * FROM listings").fetchall():
-            if r["status"] == "claimed":
+            if r["status"] == "claimed" or r["paused"]:
                 continue  # submitted by a business but not yet verified: hidden from the agent
             if type and r["type"] != type:
                 continue
@@ -185,7 +185,7 @@ class Tools:
 
     def get_listing(self, listing_id, **_):
         r = self.conn.execute("SELECT * FROM listings WHERE id=?", (int(listing_id),)).fetchone()
-        if not r or r["status"] == "claimed":
+        if not r or r["status"] == "claimed" or r["paused"]:
             return {"error": "listing not found"}
         return self._listing_dict(r, full=True)
 
@@ -244,6 +244,8 @@ class Tools:
             return {"error": "listing not found"}
         if l["status"] == "claimed":
             return {"error": "this listing is awaiting verification and cannot be booked"}
+        if l["paused"]:
+            return {"error": "the business is not offering this right now, so it cannot be booked"}
         if l["source"] == "web_lead":
             return {"error": "this is an unverified web lead and cannot be booked; the user can contact the seller"}
         if not s or s["listing_id"] != l["id"]:
@@ -354,7 +356,7 @@ class Tools:
             price_for, corroborated = lead["price_for"], bool(lead["corroborated"])
         else:
             r = self.conn.execute("SELECT * FROM listings WHERE id=?", (int(listing_id),)).fetchone()
-            if not r or r["status"] == "claimed":
+            if not r or r["status"] == "claimed" or r["paused"]:
                 return {"error": "listing not found"}
             name, phone, url = r["name"], contact.parse_zm_phone(r["contact_whatsapp"]), None
             verified, sample, price_text = r["status"] == "verified", bool(r["is_sample"]), None

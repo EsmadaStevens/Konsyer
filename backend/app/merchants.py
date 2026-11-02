@@ -139,7 +139,7 @@ def get_merchant(conn, user_id, merchant_id):
     m = conn.execute("SELECT * FROM merchants WHERE id=?", (merchant_id,)).fetchone()
     if m is None or m["owner_user_id"] != user_id:
         raise MerchantError("not_found", "Merchant not found.")
-    rows = conn.execute("SELECT id, name, type, price, status, photo IS NOT NULL AS has_photo FROM listings "
+    rows = conn.execute("SELECT id, name, type, price, status, paused, photo IS NOT NULL AS has_photo FROM listings "
                         "WHERE merchant_id=? ORDER BY id",
                         (merchant_id,)).fetchall()
     return {"merchant_id": m["id"], "name": m["name"], "area": m["area"], "whatsapp": m["whatsapp"],
@@ -235,3 +235,40 @@ def get_photo(conn, listing_id, user_id=None, admin=False):
     if not (admin or r["status"] == "verified" or (user_id is not None and r["owner_user_id"] == user_id)):
         raise MerchantError("not_found", "No picture.")
     return bytes(r["photo"]), detect_image(bytes(r["photo"]))
+
+
+# ---------- running a live listing: add times, pause ----------
+MAX_TOTAL_SLOTS = 60
+
+
+def add_slots(conn, user_id, listing_id, slots, today):
+    """More times for an existing listing. Price and description stay locked: they are what a customer's photo
+    check is judged against, so they cannot change after people have booked."""
+    r = _own_listing(conn, user_id, listing_id)
+    slots = slots or []
+    if not 1 <= len(slots) <= MAX_SLOTS:
+        raise MerchantError("invalid", f"Add between 1 and {MAX_SLOTS} times at once.")
+    have = conn.execute("SELECT COUNT(*) FROM slots WHERE listing_id=?", (listing_id,)).fetchone()[0]
+    if have + len(slots) > MAX_TOTAL_SLOTS:
+        raise MerchantError("invalid", f"A listing can have at most {MAX_TOTAL_SLOTS} times.")
+    parsed = [_parse_slot(s, today, i + 1) for i, s in enumerate(slots)]
+    for st, en, cap in parsed:
+        conn.execute("INSERT INTO slots(listing_id, starts_at, ends_at, capacity, booked) VALUES (?,?,?,?,0)",
+                     (listing_id, st, en, cap))
+    conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                 (user_id, "listing_times_added", f"{len(parsed)} time(s) were added to '{r['name']}'.",
+                  "merchant_listing_times"))
+    conn.commit()
+    return {"listing_id": listing_id, "added": len(parsed)}
+
+
+def set_paused(conn, user_id, listing_id, paused):
+    """Stop (or resume) offering something. Existing bookings are still honoured: the business can serve them,
+    offer another time or cancel with a full refund."""
+    r = _own_listing(conn, user_id, listing_id)
+    conn.execute("UPDATE listings SET paused=? WHERE id=?", (1 if paused else 0, listing_id))
+    conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
+                 (user_id, "listing_paused" if paused else "listing_resumed",
+                  f"'{r['name']}' was {'paused' if paused else 'resumed'} by its owner.", "merchant_listing_pause"))
+    conn.commit()
+    return {"listing_id": listing_id, "paused": bool(paused)}

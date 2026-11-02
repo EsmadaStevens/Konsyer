@@ -124,6 +124,16 @@ class SlotIn(BaseModel):
     capacity: int = 1
 
 
+class AddTimesIn(BaseModel):
+    user_id: int = 1
+    slots: list[SlotIn]
+
+
+class PauseIn(BaseModel):
+    user_id: int = 1
+    paused: bool = True
+
+
 class MerchantListingIn(BaseModel):
     user_id: int = 1
     title: str
@@ -297,6 +307,17 @@ def add_merchant_listing(merchant_id: int, body: MerchantListingIn, conn=Depends
 @app.get("/merchants/{merchant_id}")
 def get_merchant(merchant_id: int, user_id: int = 1, conn=Depends(db)):
     return _merchant_call(merchants.get_merchant, conn, user_id, merchant_id)
+
+
+@app.post("/listings/{listing_id}/slots")
+def add_listing_times(listing_id: int, body: AddTimesIn, conn=Depends(db)):
+    return _merchant_call(merchants.add_slots, conn, body.user_id, listing_id,
+                          [x.model_dump() for x in body.slots], lusaka_today())
+
+
+@app.post("/listings/{listing_id}/pause")
+def pause_listing(listing_id: int, body: PauseIn, conn=Depends(db)):
+    return _merchant_call(merchants.set_paused, conn, body.user_id, listing_id, body.paused)
 
 
 @app.post("/listings/{listing_id}/photo")
