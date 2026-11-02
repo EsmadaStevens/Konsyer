@@ -44,7 +44,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _ctrl = TextEditingController();
   final _scroll = ScrollController();
   final List<Msg> _msgs = [
-    Msg(false, 'Hi! Tell me what you want to do, your budget and group size, and I will plan it.'),
+    Msg(false, _greeting),
   ];
   bool _loading = false;
   Timer? _timer;
@@ -54,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _loadHistory();
     _loadAttention();
     _timer = Timer.periodic(const Duration(seconds: 15), (_) => _loadAttention());
   }
@@ -64,6 +65,43 @@ class _ChatScreenState extends State<ChatScreen> {
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  static const _greeting = 'Hi! Tell me what you want to do, your budget and group size, and I will plan it.';
+
+  /// The conversation is kept on the server, so a reload picks up where you left off.
+  Future<void> _loadHistory() async {
+    try {
+      final j = await apiGet('/chat/history?user_id=$userId');
+      final rows = ((j['messages'] as List?) ?? []).cast<Map<String, dynamic>>();
+      if (!mounted || rows.isEmpty) return;
+      setState(() {
+        _msgs
+          ..clear()
+          ..add(Msg(false, _greeting))
+          ..addAll([
+            for (final r in rows)
+              Msg(r['from_user'] == true, (r['text'] ?? '').toString(),
+                  ((r['cards'] as List?) ?? []).cast<Map<String, dynamic>>(), r['suggest_web'] == true)
+          ]);
+      });
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    } catch (_) {
+      // a fresh conversation is fine if the history cannot be loaded
+    }
+  }
+
+  Future<void> _newChat() async {
+    try {
+      await apiPost('/chat/clear', {'user_id': userId});
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _msgs
+        ..clear()
+        ..add(Msg(false, _greeting));
+    });
   }
 
   /// Offers, claims waiting for a reply and fresh decisions, so nobody has to dig through screens to find them.
@@ -122,6 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('Konsyer'),
         actions: [
+          IconButton(tooltip: 'New chat', icon: const Icon(Icons.add_comment_outlined), onPressed: _newChat),
           IconButton(
             tooltip: 'For businesses',
             icon: const Icon(Icons.storefront_outlined),

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import activity, attention, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
+from . import activity, attention, chat_store, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -179,10 +179,22 @@ def chat(body: ChatIn, conn=Depends(db)):
     cards = ([card] if card else []) + ([lead_card] if lead_card else []) + \
         [contact_card(c) for c in r.get("contacts", [])]
     tools_used = {t["tool"] for t in r["trace"]}
-    return {"stub": False, "reply": r["reply"], "cards": cards,
-            # registered listings were searched but the web was not: offer a one-tap "also search the web"
-            "suggest_web": "search_listings" in tools_used and "discover_services" not in tools_used,
+    # registered listings were searched but the web was not: offer a one-tap "also search the web"
+    suggest_web = "search_listings" in tools_used and "discover_services" not in tools_used
+    chat_store.save_exchange(conn, body.user_id, body.message, r["reply"], cards, r["plan_id"], suggest_web)
+    return {"stub": False, "reply": r["reply"], "cards": cards, "suggest_web": suggest_web,
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
+
+
+@app.get("/chat/history")
+def chat_history(user_id: int = 1, conn=Depends(db)):
+    return {"messages": chat_store.history(conn, user_id)}
+
+
+@app.post("/chat/clear")
+def chat_clear(body: ActionIn, conn=Depends(db)):
+    chat_store.clear(conn, body.user_id)
+    return {"ok": True}
 
 
 # ---------- wallet (sandbox money, not real funds) ----------
