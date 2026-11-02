@@ -6,7 +6,7 @@
 
 Built solo by Esmada Stevens in Lusaka for the Meta Global AI Developer Hackathon (Indie track, "Build for Your World").
 
-Konsyer is a **web app** built with Flutter: you open it in a browser, on a computer or a phone. The same code can be built for Android and iOS, but this submission is the web version.
+Konsyer is a **web app** built with Flutter: you open it in a browser, on a computer or a phone. The repository also contains Flutter's standard `android/` and `ios/` project folders, because every Flutter project has them, so the same code can be built for phones. We have **not built or tested** the phone versions; this submission is the web version.
 
 ---
 

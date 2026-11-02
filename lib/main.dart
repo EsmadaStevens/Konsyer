@@ -74,6 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadMode() async {
     try {
       final j = await apiGet('/mode');
+      replayMode = j['mode'] == 'replay';
       if (mounted) setState(() => _mode = (j['mode'] ?? 'live').toString());
     } catch (_) {}
   }

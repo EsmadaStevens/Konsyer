@@ -96,7 +96,7 @@ class _MerchantScreenState extends State<MerchantScreen> {
   /// A verified business can attach one picture of what it offers. Customers see it once the listing is verified.
   Future<void> _changePhoto(Map<String, dynamic> l) async {
     try {
-      final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 85);
+      final x = await pickPhoto(ImageSource.gallery);
       if (x == null) return;
       final bytes = await x.readAsBytes();
       setState(() => busy = true);
@@ -505,7 +505,7 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
   /// Only a registered business can do this, and nothing is visible to customers until Konsyer verifies you.
   Future<void> _draft(String kind) async {
     try {
-      final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 2400, imageQuality: 90);
+      final x = await pickPhoto(ImageSource.gallery, maxWidth: 2400, quality: 90);
       if (x == null) return;
       final bytes = await x.readAsBytes();
       setState(() => _busy = true);
@@ -799,8 +799,7 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
                       ? null
                       : () async {
                           if (_picture != null) return setState(() => _picture = null);
-                          final x = await ImagePicker()
-                              .pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 85);
+                          final x = await pickPhoto(ImageSource.gallery);
                           if (x == null) return;
                           final b = await x.readAsBytes();
                           setState(() {

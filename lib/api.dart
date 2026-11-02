@@ -1,11 +1,22 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
 // Set with: --dart-define=API_BASE=http://localhost:8000
 // (Android emulator: http://10.0.2.2:8000)
 const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://localhost:8000');
 const userId = 1;
+
+/// True when the backend answers from recordings. Replay finds a photo by its file name, and on the web the picker
+/// loses the name when it shrinks a photo, so in replay we pick the original file untouched.
+bool replayMode = false;
+
+Future<XFile?> pickPhoto(ImageSource source, {int maxWidth = 1600, int quality = 85}) {
+  return replayMode
+      ? ImagePicker().pickImage(source: source)
+      : ImagePicker().pickImage(source: source, maxWidth: maxWidth.toDouble(), imageQuality: quality);
+}
 
 String fmtK(int ngwee) {
   final sign = ngwee < 0 ? '-' : '';
