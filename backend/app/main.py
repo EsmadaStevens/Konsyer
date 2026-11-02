@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config  # noqa: F401  (loads .env)
-from . import activity, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
+from . import activity, attention, disputes, escrow, executor, flyers, leads, listing_drafts, merchants, reschedule, wallet
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
@@ -359,6 +359,11 @@ def _escrow_call(fn, *args, **kw):
         return fn(*args, **kw)
     except escrow.EscrowError as e:
         raise HTTPException(status_code=escrow.STATUS.get(e.code, 400), detail=e.message)
+
+
+@app.get("/attention")
+def my_attention(user_id: int = 1, conn=Depends(db)):
+    return _escrow_call(attention.for_user, conn, user_id)
 
 
 @app.get("/vouchers")

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '/screens/activity_screen.dart';
 import '/screens/admin_screen.dart';
@@ -46,6 +47,43 @@ class _ChatScreenState extends State<ChatScreen> {
     Msg(false, 'Hi! Tell me what you want to do, your budget and group size, and I will plan it.'),
   ];
   bool _loading = false;
+  Timer? _timer;
+  int _attnCount = 0;
+  List<Map<String, dynamic>> _attn = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAttention();
+    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _loadAttention());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Offers, claims waiting for a reply and fresh decisions, so nobody has to dig through screens to find them.
+  Future<void> _loadAttention() async {
+    try {
+      final j = await apiGet('/attention?user_id=$userId');
+      if (!mounted) return;
+      setState(() {
+        _attnCount = (j['count'] as num? ?? 0).toInt();
+        _attn = ((j['items'] as List?) ?? []).cast<Map<String, dynamic>>();
+      });
+    } catch (_) {
+      // the banner is a convenience: stay quiet if the server is busy
+    }
+  }
+
+  Future<void> _open(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    _loadAttention();
+  }
 
   Future<void> _send([String? override]) async {
     final text = (override ?? _ctrl.text).trim();
@@ -69,6 +107,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() => _msgs.add(Msg(false, 'Could not reach the server: $e')));
     } finally {
       setState(() => _loading = false);
+      _loadAttention();
       await Future.delayed(const Duration(milliseconds: 50));
       if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent + 200,
@@ -86,20 +125,20 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             tooltip: 'For businesses',
             icon: const Icon(Icons.storefront_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const MerchantScreen())),
+            onPressed: () => _open(const MerchantScreen()),
           ),
           IconButton(
             tooltip: 'Activity: what the models did',
             icon: const Icon(Icons.timeline_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
+            onPressed: () => _open(const ActivityScreen()),
           ),
           IconButton(
             tooltip: 'Wallet',
-            icon: const Icon(Icons.account_balance_wallet_outlined),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const WalletScreen())),
+            icon: Badge(
+                isLabelVisible: _attnCount > 0,
+                label: Text('$_attnCount'),
+                child: const Icon(Icons.account_balance_wallet_outlined)),
+            onPressed: () => _open(const WalletScreen()),
           ),
         ],
       ),
@@ -112,6 +151,33 @@ class _ChatScreenState extends State<ChatScreen> {
             itemBuilder: (_, i) => _Bubble(_msgs[i]),
           ),
         ),
+        if (_attn.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Card(
+              margin: EdgeInsets.zero,
+              color: Theme.of(context).colorScheme.primaryContainer.withAlpha(90),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _open(_attn.first['target'] == 'business' ? const MerchantScreen() : const VouchersScreen()),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(children: [
+                    Icon(_attn.first['kind'] == 'action' ? Icons.notifications_active_outlined : Icons.info_outline,
+                        size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Text(
+                            _attn.length > 1
+                                ? '${_attn.first['text']}  (+${_attn.length - 1} more)'
+                                : '${_attn.first['text']}',
+                            style: Theme.of(context).textTheme.bodySmall)),
+                    const Icon(Icons.chevron_right),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         if (_loading) const LinearProgressIndicator(minHeight: 2),
         if (!_loading && _msgs.isNotEmpty && _msgs.last.suggestWeb)
           Align(
