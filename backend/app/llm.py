@@ -64,7 +64,8 @@ def mode() -> str:
 
 
 def _norm(text) -> str:
-    return re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    # a full stop, "!" or "?" at the end must not matter: "...budget is K300." finds the recording of "...K300"
+    return re.sub(r"\s+", " ", str(text or "")).strip().lower().rstrip(" .!?")
 
 
 def request_key(job, messages):
