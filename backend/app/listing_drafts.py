@@ -15,7 +15,7 @@ import re
 from . import flyers, merchants
 from .contact import one_line
 from .flyers import FlyerError, detect_image
-from .llm import LLMError, as_job, chat
+from .llm import LLMError, ReplayMiss, as_job, chat
 from .money import fmt_k
 from .specificity import ADVICE, is_specific
 
@@ -115,6 +115,8 @@ def from_photo(conn, user_id, merchant_id, data, llm_chat=None) -> dict:
                             max_tokens=8000)
         content = re.sub(r"^```(?:json)?|```$", "", (choice["message"].get("content") or "").strip()).strip()
         raw = json.loads(content) if content else {}
+    except ReplayMiss as e:
+        raise FlyerError("extract_failed", str(e))
     except (LLMError, KeyError, json.JSONDecodeError, Exception):
         raise FlyerError("extract_failed", "Could not read that photo. Try a clearer, well-lit one.")
     out = _clean_photo(raw)

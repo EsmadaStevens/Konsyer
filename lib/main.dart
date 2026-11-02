@@ -54,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _loadMode();
     _loadHistory();
     _loadAttention();
     _timer = Timer.periodic(const Duration(seconds: 15), (_) => _loadAttention());
@@ -65,6 +66,16 @@ class _ChatScreenState extends State<ChatScreen> {
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  String _mode = 'live';
+
+  /// live, replay (recorded model answers, no key needed) or stub: say which, so nobody mistakes a recording for a live call.
+  Future<void> _loadMode() async {
+    try {
+      final j = await apiGet('/mode');
+      if (mounted) setState(() => _mode = (j['mode'] ?? 'live').toString());
+    } catch (_) {}
   }
 
   static const _greeting = 'Hi! Tell me what you want to do, your budget and group size, and I will plan it.';
@@ -182,6 +193,16 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
       body: Column(children: [
+        if (_mode == 'replay')
+          Container(
+            width: double.infinity,
+            color: Theme.of(context).colorScheme.tertiaryContainer.withAlpha(120),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Text(
+                'Replay mode: the answers are recordings of the real models, so only the recorded examples work. '
+                'Add a model key to go live.',
+                style: Theme.of(context).textTheme.labelSmall),
+          ),
         Expanded(
           child: ListView.builder(
             controller: _scroll,

@@ -9,6 +9,7 @@ import tempfile
 from datetime import timedelta
 
 from .extraction import extract_flyer
+from .llm import ReplayMiss
 
 log = logging.getLogger("konsyer.flyers")
 
@@ -68,6 +69,8 @@ def read_flyer(data, today):
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
         return extract_flyer(path, today)
+    except ReplayMiss as e:  # keyless replay demo: say plainly that this input was not recorded
+        raise FlyerError("extract_failed", str(e)) from e
     except Exception as e:
         log.exception("flyer extraction failed")
         raise FlyerError("extract_failed", "Could not read that image. Try a clearer photo.") from e
