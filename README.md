@@ -28,7 +28,7 @@ In Zambia, a lot of everyday commerce happens in WhatsApp chats and Facebook pag
 1. Open the app and say: *"I want French tip nails. My budget is K300."* It finds a listing and proposes a booking within your budget.
 2. Say: *"Plan a dinner for 4 people, my budget is K50."* The budget is enforced in code: nothing over K50 can be proposed or booked, however the request is worded.
 3. Approve a booking, then open the wallet and **Held payments**. Tap **Something is wrong**, then **It is not as described**, and upload `red_nails.jpg` from `backend/demo/images/`. The model flags a mismatch; the money stays held.
-4. Open **For businesses** to see the seller's side: the customer's photo, **Refund customer** and **Contest**.
+4. The seller's side (the customer's photo, **Refund customer**, **Contest**) belongs to a business you register yourself: register one under **For businesses**, verify it in the admin console, list something, and book it. In replay mode the sample businesses have no owner, so that screen stays on the registration form; the case is still visible to the admin (next step).
 5. Open `/#/admin` in a second tab to see Konsyer's side: businesses to verify and cases to decide.
 6. Open **Activity** (the timeline icon) to see which model did what, and what the rules and people decided.
 
@@ -106,7 +106,7 @@ Open `http://localhost:<port>/#/admin` in its own tab and type the admin key fro
 
 ```bash
 cd backend
-python -m pytest -q          # 347 tests, no keys needed
+python -m pytest -q          # 349 tests, no keys needed
 python -m scripts.red_team   # 14 attacks against the real code, no keys needed
 ```
 
@@ -160,7 +160,7 @@ Konsyer's value to a seller is demand and protection: customers who trust paying
 
 ```
 backend/app/        FastAPI app: agent, policy, escrow, disputes, merchants, replay
-backend/tests/      347 tests
+backend/tests/      349 tests
 backend/scripts/    red team, probes, the demo recorder
 backend/demo/       the replay recording and licensed demo pictures
 backend/eval/       saved red-team results

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '/screens/activity_screen.dart';
 import '/screens/admin_screen.dart';
 import '/api.dart';
+import '/theme.dart';
 import '/contact_card.dart';
 import '/screens/merchant_screen.dart';
 import '/screens/vouchers_screen.dart';
@@ -15,11 +16,11 @@ class ConciergeApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'Konsyer',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFFD4AF37), brightness: Brightness.dark),
-        ),
+        theme: K.theme(),
+        // On a wide screen the app sits in a readable centred column; on a phone this changes nothing.
+        builder: (context, child) => Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: K.maxWidth), child: child)),
         home: const ChatScreen(),
         // The admin console is a separate address (open /#/admin in its own tab), not part of the customer app.
         routes: {'/admin': (_) => const AdminScreen()},
@@ -196,13 +197,20 @@ class _ChatScreenState extends State<ChatScreen> {
       body: Column(children: [
         if (_mode == 'replay')
           Container(
-            width: double.infinity,
-            color: Theme.of(context).colorScheme.tertiaryContainer.withAlpha(120),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Text(
-                'Replay mode: the answers are recordings of the real models, so only the recorded examples work. '
-                'Add a model key to go live.',
-                style: Theme.of(context).textTheme.labelSmall),
+            margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+                color: K.warn.withAlpha(30), borderRadius: BorderRadius.circular(10), border: Border.all(color: K.warn.withAlpha(110))),
+            child: Row(children: [
+              const Icon(Icons.replay, size: 16, color: K.warn),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    'Replay mode: answers are recordings of the real models, so only the recorded examples work. '
+                    'Add a model key to go live.',
+                    style: Theme.of(context).textTheme.labelSmall),
+              ),
+            ]),
           ),
         Expanded(
           child: ListView.builder(
@@ -254,19 +262,17 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: Row(children: [
               Expanded(
                 child: TextField(
                   controller: _ctrl,
                   onSubmitted: (_) => _send(),
-                  decoration: const InputDecoration(
-                      hintText: 'e.g. Saturday, 5 of us, K2,000, something active',
-                      border: OutlineInputBorder()),
+                  decoration: const InputDecoration(hintText: 'e.g. Saturday, 5 of us, K2,000, something active'),
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton.filled(onPressed: _send, icon: const Icon(Icons.send)),
+              IconButton.filled(onPressed: _send, icon: const Icon(Icons.arrow_upward)),
             ]),
           ),
         ),
@@ -292,10 +298,16 @@ class _Bubble extends StatelessWidget {
               margin: const EdgeInsets.symmetric(vertical: 4),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: m.fromUser ? cs.primaryContainer : cs.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(14),
+                color: m.fromUser ? cs.primaryContainer : K.surface,
+                border: m.fromUser ? null : Border.all(color: K.border),
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(m.fromUser ? 16 : 4),
+                  bottomRight: Radius.circular(m.fromUser ? 4 : 16),
+                ),
               ),
-              child: Text(m.text),
+              child: SelectableText(m.text, style: const TextStyle(height: 1.4)),
             ),
             for (final c in m.cards)
               if (c['type'] == 'plan')
@@ -370,7 +382,7 @@ class _PlanCardState extends State<PlanCard> {
       ]);
     } else if (status == 'executed') {
       footer = Text('Booked. Money is held until you check in (sandbox wallet).',
-          style: small?.copyWith(color: Colors.greenAccent));
+          style: small?.copyWith(color: K.ok));
     } else if (status == 'denied') {
       footer = Text(decision == 'DENY' ? 'Blocked by your limits. Nothing charged.' : 'Declined. Nothing charged.',
           style: small?.copyWith(color: cs.error));
@@ -413,15 +425,17 @@ class _PlanCardState extends State<PlanCard> {
     final items = (c['items'] as List).cast<Map<String, dynamic>>();
     final total = (c['total'] as num).toInt();
     final budget = (c['budget'] as num).toInt();
-    final small = Theme.of(context).textTheme.labelSmall;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c['title'] as String, style: Theme.of(context).textTheme.titleMedium),
-          if (c['sample_data'] == true) Text('Sample data', style: small),
-          Text('Sandbox wallet: no real money moves', style: small),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            if (c['sample_data'] == true) const Pill('Sample data', color: K.warn, icon: Icons.science_outlined),
+            const Pill('Sandbox: no real money moves', color: K.muted, icon: Icons.shield_outlined),
+          ]),
           const Divider(),
           for (final i in items) _item(i),
           const Divider(),

@@ -195,3 +195,10 @@ def test_root_explains_itself():
     r = TestClient(app).get("/")
     assert r.status_code == 200
     assert r.json()["docs"] == "/docs"
+
+
+def test_trailing_punctuation_does_not_change_the_key():
+    from app import llm
+    a = llm.request_key("agent", [{"role": "user", "content": "I want French tip nails. My budget is K300"}])
+    b = llm.request_key("agent", [{"role": "user", "content": "I want French tip nails. My budget is K300."}])
+    assert a[0] == b[0]

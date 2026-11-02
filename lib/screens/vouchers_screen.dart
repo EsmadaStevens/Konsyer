@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api.dart';
+import '../theme.dart';
 import '../dispute_card.dart';
 
 /// "Held payments": money held in escrow between you and a seller (sandbox; a licensed payment partner in production).
@@ -315,17 +316,26 @@ class _VouchersScreenState extends State<VouchersScreen> {
             Text(v['amount_display'].toString(), style: t.titleMedium),
           ]),
           const SizedBox(height: 4),
-          Wrap(spacing: 8, children: [
-            Chip(label: Text(_stateLabel(v['state'].toString())), visualDensity: VisualDensity.compact),
-            Chip(
-              label: Text(verified
-                  ? 'Verified seller'
-                  : (community ? 'Community listing: posted by a user, not verified' : 'Seller not verified')),
-              visualDensity: VisualDensity.compact,
-              backgroundColor: verified ? Colors.green.withAlpha(60) : cs.errorContainer.withAlpha(90),
-            ),
+          const SizedBox(height: 4),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            Pill(_stateLabel(v['state'].toString()),
+                color: v['state'] == 'held' ? K.gold : (v['state'] == 'released' ? K.ok : K.muted)),
+            Pill(
+                verified
+                    ? 'Verified seller'
+                    : (community ? 'Community listing: posted by a user, not verified' : 'Seller not verified'),
+                color: verified ? K.ok : K.bad,
+                icon: verified ? Icons.verified_outlined : Icons.warning_amber_outlined),
           ]),
-          if ((v['starts'] ?? '').toString().isNotEmpty) Text('When: ${v['starts']}', style: t.bodySmall),
+          if ((v['starts'] ?? '').toString().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                const Icon(Icons.schedule, size: 15, color: K.muted),
+                const SizedBox(width: 6),
+                Text('${v['starts']}', style: t.bodyMedium),
+              ]),
+            ),
           if (held && (v['policy_text'] ?? '').toString().isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(v['policy_text'].toString(), style: t.bodySmall),
