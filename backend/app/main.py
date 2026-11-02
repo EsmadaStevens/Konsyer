@@ -548,3 +548,15 @@ def resolve_dispute_as_admin(dispute_id: int, body: AdminResolveIn, x_admin_key:
 @app.get("/activity")
 def get_activity(user_id: int = 1, limit: int = 40, conn=Depends(db)):
     return activity.view(conn, user_id, limit)
+
+
+# ---------- a friendly page at the root, so opening the backend address explains itself ----------
+@app.get("/")
+def root():
+    return {
+        "name": "Konsyer API",
+        "note": "This is the backend. The app itself is the Flutter web app.",
+        "mode": llm.mode(),
+        "docs": "/docs",
+        "open_the_app": "In a second terminal at the project root: flutter run -d chrome --dart-define=API_BASE=http://localhost:8000",
+    }
