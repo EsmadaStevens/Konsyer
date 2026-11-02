@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from . import escrow
 from .contact import one_line
 from .flyers import detect_image
-from .llm import LLMError, as_job, chat
+from .llm import LLMError, ReplayMiss, as_job, chat, replaying
 from .specificity import is_specific
 
 MAX_BYTES = 8 * 1024 * 1024
@@ -155,12 +155,16 @@ def assess(listing_text, note, image: bytes, llm_chat: Optional[Callable] = None
         content = (choice["message"].get("content") or "").strip()
         content = re.sub(r"^```(?:json)?|```$", "", content).strip()
         raw = json.loads(content) if content else {}
+    except ReplayMiss as e:
+        raise DisputeError("model_unavailable", str(e))
     except (LLMError, KeyError, json.JSONDecodeError, Exception) as e:  # never leak details, never crash the app
         raise DisputeError("model_unavailable", f"The photo check is unavailable right now ({type(e).__name__}).")
     return _clean(raw)
 
 
 def _model_name():
+    if replaying():
+        return "replay (recorded answer)"
     return os.environ.get("LLM_MODEL", "meta-models/muse-spark-open-1026")
 
 

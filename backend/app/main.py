@@ -15,7 +15,8 @@ from . import activity, attention, chat_store, disputes, escrow, executor, flyer
 from .agent.cards import contact_card, plan_card
 from .agent.loop import run_agent
 from .db import get_conn, init_db
-from .llm import LLMError
+from . import llm
+from .llm import LLMError, ReplayMiss
 from .seed import seed
 from .timeutil import lusaka_today
 
@@ -165,10 +166,12 @@ def _stub(message):
 
 @app.post("/chat")
 def chat(body: ChatIn, conn=Depends(db)):
-    if os.environ.get("KONSYER_STUB") == "1" or not os.environ.get("LLM_API_KEY"):
+    if not llm.available():
         return _stub(body.message)
     try:
         r = run_agent(conn, body.user_id, body.message, body.history)
+    except ReplayMiss as e:  # keyless replay demo: say so plainly instead of failing
+        return {"stub": False, "reply": str(e), "cards": [], "suggest_web": False, "trace": []}
     except (LLMError, httpx.HTTPError) as e:
         raise HTTPException(status_code=502, detail=f"model unavailable: {e}")
     card = plan_card(conn, r["plan_id"]) if r["plan_id"] else None
@@ -184,6 +187,12 @@ def chat(body: ChatIn, conn=Depends(db)):
     chat_store.save_exchange(conn, body.user_id, body.message, r["reply"], cards, r["plan_id"], suggest_web)
     return {"stub": False, "reply": r["reply"], "cards": cards, "suggest_web": suggest_web,
             "trace": [{"tool": t["tool"], "args": t["args"]} for t in r["trace"]]}
+
+
+@app.get("/mode")
+def get_mode():
+    """live (real models), replay (recorded answers, no key needed) or stub (canned example)."""
+    return {"mode": llm.mode()}
 
 
 @app.get("/chat/history")
@@ -274,13 +283,15 @@ def _draft_call(fn, *args):
 @app.post("/merchants/{merchant_id}/draft-from-flyer")
 def draft_from_flyer(merchant_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
     data = image.file.read(flyers.MAX_BYTES + 1)  # never read more than the cap plus one byte
-    return _draft_call(listing_drafts.from_flyer, conn, user_id, merchant_id, data, lusaka_today())
+    with llm.input_name(image.filename):
+        return _draft_call(listing_drafts.from_flyer, conn, user_id, merchant_id, data, lusaka_today())
 
 
 @app.post("/merchants/{merchant_id}/draft-from-photo")
 def draft_from_photo(merchant_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
     data = image.file.read(listing_drafts.MAX_PHOTO_BYTES + 1)
-    return _draft_call(listing_drafts.from_photo, conn, user_id, merchant_id, data)
+    with llm.input_name(image.filename):
+        return _draft_call(listing_drafts.from_photo, conn, user_id, merchant_id, data)
 
 
 # ---------- merchants (signup is open; verification is admin-only) ----------
@@ -483,10 +494,11 @@ def _dispute_call(fn, *args, **kw):
 @app.post("/vouchers/{voucher_id}/dispute")
 def dispute_voucher(voucher_id: int, photo: UploadFile = File(...), note: str = Form(""), user_id: int = Form(1),
                     conn=Depends(db)):
-    if os.environ.get("KONSYER_STUB") == "1" or not os.environ.get("LLM_API_KEY"):
+    if not llm.available():
         raise HTTPException(status_code=503, detail="The photo check needs a model key. See the README.")
     data = photo.file.read(disputes.MAX_BYTES + 1)  # never read more than the cap plus one byte
-    return _dispute_call(disputes.open_dispute, conn, user_id, voucher_id, note, data)
+    with llm.input_name(photo.filename):
+        return _dispute_call(disputes.open_dispute, conn, user_id, voucher_id, note, data)
 
 
 @app.post("/disputes/{dispute_id}/resolve")
