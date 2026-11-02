@@ -49,6 +49,8 @@ class MockDiscovery:
 def get_provider():
     """DISCOVERY_PROVIDER: 'mock' (default), 'meta' (Meta Model API web search; needs META_API_KEY), 'none'."""
     name = os.environ.get("DISCOVERY_PROVIDER", "mock").strip().lower() or "mock"
+    if os.environ.get("KONSYER_REPLAY", "").strip():
+        name = "mock"  # replay mode never searches the web: recorded answers only mention sample leads
     if name == "mock":
         return MockDiscovery()
     if name == "none":
