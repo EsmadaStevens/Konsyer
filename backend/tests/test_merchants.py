@@ -173,10 +173,11 @@ def test_verify_is_repeatable_and_picks_up_new_listings(conn):
     assert merchants.verify(conn, mid)["listings_verified"] == 1
     merchants.add_listing(conn, 2, mid, listing_fields(title="Second Room"), TODAY)
     st = conn.execute("SELECT status FROM listings WHERE name='Second Room'").fetchone()["status"]
-    assert st == "claimed"   # a verified merchant's NEW listing is not auto-verified
-    assert merchants.verify(conn, mid) == {"merchant_id": mid, "verified": True, "listings_verified": 1}
+    assert st == "verified"   # a business Konsyer already verified does not wait again for each new listing
+    # verifying again is harmless: nothing is left waiting, so nothing changes
+    assert merchants.verify(conn, mid) == {"merchant_id": mid, "verified": True, "listings_verified": 0}
     events = [r["event"] for r in conn.execute("SELECT event FROM audit_log")]
-    assert events.count("merchant_verified") == 2 and "listing_claimed" in events
+    assert events.count("merchant_verified") == 2 and "listing_claimed" in events and "listing_live" in events
 
 
 # ---------- social link, owner list, admin list, migration ----------
