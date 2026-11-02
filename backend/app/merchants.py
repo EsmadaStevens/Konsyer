@@ -108,30 +108,36 @@ def add_listing(conn, user_id, merchant_id, f, today):
     if not 1 <= len(slots) <= MAX_SLOTS:
         raise MerchantError("invalid", f"Add between 1 and {MAX_SLOTS} time slots.")
     parsed = [_parse_slot(s, today, i + 1) for i, s in enumerate(slots)]
+    # A business a person at Konsyer has already verified does not wait again for each new listing: it goes live at once.
+    # A business that is not verified yet stays hidden until it is. Price and description are locked once listed either way.
+    live = bool(m["verified"])
+    status, trust = ("verified", VERIFIED_TRUST) if live else ("claimed", CLAIMED_TRUST)
     tags = [t.strip().lower()[:30] for t in (f.get("tags") or []) if isinstance(t, str) and t.strip()][:10]
     area = _clean(f.get("area"), 80) or m["area"]
     try:
         lid = conn.execute(
             "INSERT INTO listings(merchant_id, type, name, description, tags, area, price, serves_alcohol, "
             "source, status, trust_score, contact_whatsapp, is_sample) "
-            "VALUES (?,?,?,?,?,?,?,?,'merchant','claimed',?,?,0)",
+            "VALUES (?,?,?,?,?,?,?,?,'merchant',?,?,?,0)",
             (merchant_id, f["listing_type"], title, _clean(f.get("description"), 500),
              json.dumps(tags or [f["listing_type"]]), area, price, int(bool(f.get("serves_alcohol"))),
-             CLAIMED_TRUST, m["whatsapp"])).lastrowid
+             status, trust, m["whatsapp"])).lastrowid
         for st, en, cap in parsed:
             conn.execute("INSERT INTO slots(listing_id, starts_at, ends_at, capacity, booked) VALUES (?,?,?,?,0)",
                          (lid, st, en, cap))
         conn.execute("INSERT INTO audit_log(user_id, event, why, rule) VALUES (?,?,?,?)",
-                     (user_id, "listing_claimed",
-                      f"'{title}' was submitted by its owner. It stays hidden from the agent until Konsyer verifies the business.",
-                      "merchant_listing_claimed"))
+                     (user_id, "listing_live" if live else "listing_claimed",
+                      (f"'{title}' was added by its verified owner and is live." if live else
+                       f"'{title}' was submitted by its owner. It stays hidden from the agent until Konsyer verifies the business."),
+                      "merchant_listing_live" if live else "merchant_listing_claimed"))
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     checked = is_specific(f.get("description"))
-    msg = "Submitted. It will appear to customers after Konsyer verifies your business."
-    return {"listing_id": lid, "status": "claimed", "slots": len(parsed), "photo_checked": checked,
+    msg = ("Your listing is live: your business is already verified." if live else
+           "Submitted. It will appear to customers after Konsyer verifies your business.")
+    return {"listing_id": lid, "status": status, "slots": len(parsed), "photo_checked": checked,
             "message": msg if checked else msg + " " + ADVICE}
 
 
