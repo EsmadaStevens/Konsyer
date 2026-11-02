@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api.dart';
 import '../dispute_card.dart';
+import '../photo_thumb.dart';
 
 String? _orNull(String s) => s.trim().isEmpty ? null : s.trim();
 
@@ -87,6 +89,26 @@ class _MerchantScreenState extends State<MerchantScreen> {
     final added = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => ListingFormScreen(merchant: merchant!)));
     if (added == true) _load();
+  }
+
+  int _photoVersion = 0;
+
+  /// A verified business can attach one picture of what it offers. Customers see it once the listing is verified.
+  Future<void> _changePhoto(Map<String, dynamic> l) async {
+    try {
+      final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 85);
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      setState(() => busy = true);
+      await apiUpload('/listings/${l['id']}/photo', {'user_id': '$userId'}, bytes, x.name);
+      _photoVersion++;
+      _toast('Picture added. Customers see it once the listing is verified.');
+      await _load();
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> _bookingAction(Map<String, dynamic> v, String verb, String done) async {
@@ -351,9 +373,20 @@ class _MerchantScreenState extends State<MerchantScreen> {
         for (final l in listings)
           ListTile(
             contentPadding: EdgeInsets.zero,
+            leading: l['has_photo'] == true
+                ? PhotoThumb(
+                    key: ValueKey('p${l['id']}-$_photoVersion'),
+                    load: () => apiGetBytes('/listings/${l['id']}/photo?user_id=$userId'))
+                : null,
             title: Text(l['name'].toString()),
             subtitle: Text('${l['type']} - ${fmtK((l['price'] as num).toInt())}'),
-            trailing: _statusChip(l['status'].toString()),
+            trailing: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              if (m['verified'] == true)
+                TextButton(
+                    onPressed: busy ? null : () => _changePhoto(l),
+                    child: Text(l['has_photo'] == true ? 'Change photo' : 'Add photo')),
+              _statusChip(l['status'].toString()),
+            ]),
           ),
         const SizedBox(height: 16),
         Text('Customer bookings (payment held in escrow)', style: t.titleSmall),
@@ -406,6 +439,9 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
   final _price = TextEditingController();
   final List<_SlotFields> _slots = [_SlotFields()];
   List<String> _tags = [];
+  List<int>? _picture; // the listing picture (verified businesses only)
+  String _pictureName = 'listing.jpg';
+  bool get _canPicture => widget.merchant['verified'] == true;
   List<String> _check = [];
   String? _advice;
 
@@ -427,6 +463,10 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
       if (x == null) return;
       final bytes = await x.readAsBytes();
       setState(() => _busy = true);
+      if (kind == 'photo' && _canPicture) {
+        _picture = bytes; // the same photo can be the listing picture; the owner can remove it below
+        _pictureName = x.name;
+      }
       final j = await apiUpload('/merchants/${widget.merchant['merchant_id']}/draft-from-$kind',
           {'user_id': '$userId'}, bytes, x.name);
       final price = j['price_ngwee'];
@@ -485,7 +525,16 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
         'tags': _tags,
         'slots': slots,
       });
-      _toast(j['message']?.toString() ?? 'Submitted.');
+      final pic = _picture;
+      var msg = j['message']?.toString() ?? 'Submitted.';
+      if (pic != null && _canPicture && j['listing_id'] != null) {
+        try {
+          await apiUpload('/listings/${j['listing_id']}/photo', {'user_id': '$userId'}, pic, _pictureName);
+        } catch (e) {
+          msg = '$msg The picture was not saved: $e';
+        }
+      }
+      _toast(msg);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       _toast('$e');
@@ -678,6 +727,37 @@ class _ListingFormScreenState extends State<ListingFormScreen> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
                 labelText: 'Price per person (kwacha)', prefixText: 'K ', border: OutlineInputBorder())),
+        if (_canPicture)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(children: [
+              if (_picture != null)
+                ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(Uint8List.fromList(_picture!), width: 56, height: 56, fit: BoxFit.cover)),
+              if (_picture != null) const SizedBox(width: 10),
+              Expanded(
+                  child: Text(_picture == null
+                      ? 'Listing picture (optional). Customers see it once Konsyer verifies the listing.'
+                      : 'This picture will show on your listing.',
+                      style: Theme.of(context).textTheme.bodySmall)),
+              TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          if (_picture != null) return setState(() => _picture = null);
+                          final x = await ImagePicker()
+                              .pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 85);
+                          if (x == null) return;
+                          final b = await x.readAsBytes();
+                          setState(() {
+                            _picture = b;
+                            _pictureName = x.name;
+                          });
+                        },
+                  child: Text(_picture == null ? 'Add picture' : 'Remove')),
+            ]),
+          ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Alcohol is served'),

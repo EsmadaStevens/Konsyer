@@ -296,6 +296,27 @@ def get_merchant(merchant_id: int, user_id: int = 1, conn=Depends(db)):
     return _merchant_call(merchants.get_merchant, conn, user_id, merchant_id)
 
 
+@app.post("/listings/{listing_id}/photo")
+def set_listing_photo(listing_id: int, image: UploadFile = File(...), user_id: int = Form(1), conn=Depends(db)):
+    data = image.file.read(merchants.MAX_LISTING_PHOTO + 1)
+    return _merchant_call(merchants.set_photo, conn, user_id, listing_id, data)
+
+
+@app.post("/listings/{listing_id}/photo/remove")
+def remove_listing_photo(listing_id: int, body: ActionIn, conn=Depends(db)):
+    return _merchant_call(merchants.remove_photo, conn, body.user_id, listing_id)
+
+
+@app.get("/listings/{listing_id}/photo")
+def listing_photo(listing_id: int, user_id: int = 0, x_admin_key: str = Header(default=""), conn=Depends(db)):
+    """Public for a verified listing; the owner and an admin can also see it earlier."""
+    expected = os.environ.get("KONSYER_ADMIN_KEY", "")
+    admin = bool(expected) and hmac.compare_digest(x_admin_key.encode(), expected.encode())
+    data, ext = _merchant_call(merchants.get_photo, conn, listing_id, user_id or None, admin)
+    return Response(content=data, media_type={".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+                    .get(ext, "application/octet-stream"), headers={"Cache-Control": "no-store"})
+
+
 @app.post("/admin/merchants/{merchant_id}/verify")
 def verify_merchant(merchant_id: int, x_admin_key: str = Header(default=""), conn=Depends(db)):
     _require_admin(x_admin_key)

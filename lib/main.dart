@@ -244,6 +244,16 @@ class _PlanCardState extends State<PlanCard> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           SizedBox(width: 48, child: Text((i['time'] ?? '').toString())),
+          if (i['photo_url'] != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.network('$apiBase${i['photo_url']}',
+                    width: 56, height: 56, fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => const SizedBox(width: 56, height: 56)),
+              ),
+            ),
           Expanded(child: Text((i['label'] ?? '').toString())),
           Text(fmtK((i['amount'] as num).toInt())),
         ]),
