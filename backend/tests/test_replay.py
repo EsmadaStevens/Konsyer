@@ -187,3 +187,11 @@ def test_replay_mode_never_searches_the_web(monkeypatch):
     monkeypatch.setenv("DISCOVERY_PROVIDER", "meta")
     monkeypatch.setenv("KONSYER_REPLAY", "demo/trace.jsonl")
     assert discovery.get_provider().__class__.__name__ == "MockDiscovery"
+
+
+def test_root_explains_itself():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    r = TestClient(app).get("/")
+    assert r.status_code == 200
+    assert r.json()["docs"] == "/docs"

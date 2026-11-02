@@ -6,7 +6,7 @@
 
 Built solo by Esmada Stevens in Lusaka for the Meta Global AI Developer Hackathon (Indie track, "Build for Your World").
 
-Konsyer is a **web app** built with Flutter: you open it in a browser, on a computer or a phone. The same code can be built for Android and iOS, but this submission is the web version.
+Konsyer is a **web app** built with Flutter: you open it in a browser, on a computer or a phone. The repository also contains Flutter's standard `android/` and `ios/` project folders, because every Flutter project has them, so the same code can be built for phones. We have **not built or tested** the phone versions; this submission is the web version.
 
 ---
 
@@ -67,8 +67,12 @@ You need **Python 3** (we used 3.13) and **Flutter**. From the project folder:
 
 ```bash
 cd backend
+python -m venv .venv
+.venv\Scripts\activate          # Windows PowerShell: .venv\Scripts\Activate.ps1   macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Keep that terminal open for the backend. Every new terminal needs the `activate` line again.
 
 ### Option A: no keys needed (replay mode)
 
@@ -78,7 +82,7 @@ Replay answers from a recording of the real models, so judges can run everything
 # in backend/
 cp .env.example .env              # on Windows: copy .env.example .env
 export KONSYER_REPLAY=demo/trace.jsonl     # Windows PowerShell: $env:KONSYER_REPLAY="demo\trace.jsonl"
-uvicorn app.main:app --port 8000
+python -m uvicorn app.main:app --port 8000
 ```
 
 Then, in a second terminal at the project root:
@@ -165,4 +169,4 @@ lib/                the Flutter web app
 
 ## Credits and licence
 
-Code: MIT, see `LICENSE`. Two demo photos come from Wikimedia Commons under CC BY-SA, and the nail pictures are AI-generated stand-ins; every credit, with author, licence and link, is in [`backend/demo/images/ATTRIBUTION.md`](backend/demo/images/ATTRIBUTION.md). Those pictures keep their own licences and are used only to demonstrate the photo checks.
+Code: MIT, see `LICENSE`. Two demo photos come from Wikimedia Commons under CC BY-SA, and the nail and braids pictures are AI-generated stand-ins; every credit, with author, licence and link, is in [`backend/demo/images/ATTRIBUTION.md`](backend/demo/images/ATTRIBUTION.md). Those pictures keep their own licences and are used only to demonstrate the photo checks.

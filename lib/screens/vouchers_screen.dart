@@ -214,7 +214,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
     if (src == null) return;
     setState(() => _busy = true);
     try {
-      final x = await ImagePicker().pickImage(source: src, maxWidth: 1600, imageQuality: 85);
+      final x = await pickPhoto(src);
       if (x == null) return;
       final bytes = await x.readAsBytes();
       final j = await apiUpload('/vouchers/${v['id']}/dispute', {'user_id': '$userId', 'note': note.text.trim()},
