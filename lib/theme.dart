@@ -15,7 +15,7 @@ class K {
   static const muted = Color(0xFFB9B09A);
 
   /// The widest the content gets on a big screen; on a phone it simply fills the width.
-  static const maxWidth = 860.0;
+  static const maxWidth = 760.0;
 
   static ThemeData theme() {
     final base = ColorScheme.fromSeed(seedColor: const Color(0xFFD4AF37), brightness: Brightness.dark).copyWith(

@@ -169,6 +169,37 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// What an empty chat shows: who Konsyer is, and tap-to-send examples, so nobody faces a blank screen.
+  Widget _welcome() {
+    const examples = [
+      (Icons.celebration_outlined, 'Saturday, 5 of us, K2,000, something active'),
+      (Icons.spa_outlined, 'I want French tip nails. My budget is K300'),
+      (Icons.event_available_outlined, 'Book the press-on nails for Saturday for one person. Budget K200'),
+      (Icons.restaurant_outlined, 'Plan a dinner for 4 people, my budget is K50'),
+      (Icons.content_cut, 'Find me a hair salon in Lusaka'),
+    ];
+    final t = Theme.of(context).textTheme;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.shield_moon_outlined, size: 40, color: K.gold),
+          const SizedBox(height: 12),
+          Text('Plan it. Book it. Money held until you are happy.', style: t.titleLarge, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text(_greeting, style: t.bodyMedium?.copyWith(color: K.muted), textAlign: TextAlign.center),
+          const SizedBox(height: 20),
+          Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+            for (final e in examples)
+              ActionChip(avatar: Icon(e.$1, size: 18, color: K.gold), label: Text(e.$2), onPressed: () => _send(e.$2)),
+          ]),
+          const SizedBox(height: 12),
+          Text('Tap one, or type your own.', style: t.labelSmall?.copyWith(color: K.muted)),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -215,12 +246,14 @@ class _ChatScreenState extends State<ChatScreen> {
             ]),
           ),
         Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.all(12),
-            itemCount: _msgs.length,
-            itemBuilder: (_, i) => _Bubble(_msgs[i]),
-          ),
+          child: _msgs.length == 1 && !_loading
+              ? _welcome()
+              : ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _msgs.length,
+                  itemBuilder: (_, i) => _Bubble(_msgs[i]),
+                ),
         ),
         if (_attn.isNotEmpty)
           Padding(
