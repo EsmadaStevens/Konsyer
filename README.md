@@ -30,7 +30,7 @@ In Zambia, a lot of everyday commerce happens in WhatsApp chats and Facebook pag
 3. **Holds your money.** A booking at a verified business is held in escrow. The business is paid 30 minutes after the service ends unless you object. You can cancel, accept a new time if the seller can't make it, or say something is wrong.
 4. **Checks disputes with a photo.** If the nails are not what was listed, you add a photo. A Meta vision model compares it with the listing and *recommends*. The seller can refund or contest; a Konsyer admin makes the final call. The photo is deleted when the case closes.
 5. **Finds businesses that aren't on Konsyer.** If nobody registered offers what you want, it searches the web (Meta Model API) and shows unverified leads with the price hints it found, and drafts a message you send yourself. Leads are for contacting, never for paying.
-6. **Lets businesses join.** A business registers, then adds listings by typing them in or by uploading a flyer or a product photo, which a vision model turns into a draft the owner checks and edits. Konsyer verifies the business before customers see anything.
+6. **Lets businesses join.** A business registers, then adds listings by typing them in or by uploading a flyer or a product photo, which a vision model turns into a draft the owner checks and edits. Konsyer verifies the business once, and its first listings go live; later listings from a verified business are live at once.
 
 ## Try it in three minutes
 
