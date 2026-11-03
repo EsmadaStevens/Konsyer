@@ -4,6 +4,15 @@
 
 > The model reads and recommends. Code enforces the rules, and people decide the money.
 
+```
+Red team: 14/14 attacks blocked. A fooled model cannot move money, break your budget, or refund anyone.
+(python -m scripts.red_team, no keys needed)
+```
+
+| 1. Over the limit: blocked by code | 2. Booked: money held in escrow | 3. Wrong photo: a model recommends, a person decides |
+|---|---|---|
+| ![Booking over the K1,000 limit is blocked](docs/screenshots/1-blocked-over-limit.png) | ![Booking proposed within budget](docs/screenshots/2-booking-held.png) | ![Photo does not match the listing](docs/screenshots/3-dispute-mismatch.png) |
+
 Built solo by Esmada Stevens in Lusaka for the Meta Global AI Developer Hackathon (Indie track, "Build for Your World").
 
 Konsyer is a **web app** built with Flutter: you open it in a browser, on a computer or a phone. The repository also contains Flutter's standard `android/` and `ios/` project folders, because every Flutter project has them, so the same code can be built for phones. We have **not built or tested** the phone versions; this submission is the web version.
