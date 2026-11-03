@@ -284,6 +284,7 @@ class _MerchantScreenState extends State<MerchantScreen> with AutoRefresh<Mercha
             Text('You can confirm once the booking time has started.', style: t.labelSmall),
           if (dispute != null)
             DisputeCard(dispute,
+                audience: DisputeAudience.business,
                 loadPhoto: v['can_resolve'] == true
                     ? () => apiGetBytes('/disputes/${dispute['id']}/photo?user_id=$userId')
                     : null),

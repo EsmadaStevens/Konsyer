@@ -1,13 +1,42 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
+/// Who is reading the card. The server's own `message` is written to the customer ("you were refunded"), so the
+/// business and the admin get wording that is true for them.
+enum DisputeAudience { customer, business, admin }
+
 /// Shows what the photo check found. The model only RECOMMENDS: a person (the business or Konsyer) decides.
 /// Used on the customer's Held payments, the business dashboard and the admin console.
 class DisputeCard extends StatelessWidget {
   final Map<String, dynamic> d;
   /// Set where a person must decide: loads the photo, which exists only while the review is open.
   final Future<Uint8List> Function()? loadPhoto;
-  const DisputeCard(this.d, {super.key, this.loadPhoto});
+  final DisputeAudience audience;
+  const DisputeCard(this.d, {super.key, this.loadPhoto, this.audience = DisputeAudience.customer});
+
+  String _message() {
+    if (audience == DisputeAudience.customer) return (d['message'] ?? '').toString();
+    final status = (d['status'] ?? '').toString();
+    final withKonsyer = d['stage'] == 'konsyer';
+    switch (status) {
+      case 'open':
+        if (audience == DisputeAudience.admin) {
+          return withKonsyer ? 'Needs a decision from Konsyer.' : 'Waiting for the seller to refund or contest.';
+        }
+        return withKonsyer
+            ? 'With Konsyer: a person will decide. The money stays held until then.'
+            : 'Waiting for your reply: refund the customer or contest. If you do not reply in time, Konsyer reviews it.';
+      case 'refunded':
+        return 'Resolved: the customer was refunded.';
+      case 'rejected':
+        return 'Resolved: Konsyer did not accept the claim. The booking continues as normal.';
+      case 'no_issue':
+        return 'The photo looked like the listing, so no review was opened.';
+      case 'retry':
+        return 'The photo was unclear, so the customer was asked to try again.';
+    }
+    return '';
+  }
 
   Future<void> _showPhoto(BuildContext context) async {
     try {
@@ -97,9 +126,9 @@ class DisputeCard extends StatelessWidget {
                 icon: const Icon(Icons.photo_outlined),
                 label: const Text('View the customer\'s photo')),
           ),
-        if ((d['message'] ?? '').toString().isNotEmpty && status.isNotEmpty) ...[
+        if (_message().isNotEmpty && status.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Text(d['message'].toString(), style: t.bodySmall),
+          Text(_message(), style: t.bodySmall),
         ],
         const SizedBox(height: 6),
         Text('A model\'s recommendation only. A person decides. The photo is kept only while a review is open, then deleted.', style: t.labelSmall),

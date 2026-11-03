@@ -112,7 +112,7 @@ class _AdminScreenState extends State<AdminScreen> with AutoRefresh<AdminScreen>
             Text(fmtK((d['amount'] as num).toInt())),
           ]),
           Text('Seller: ${d['payee_name']}${d['payee_verified'] == true ? ' (verified)' : ''}  -  ${d['stage'] == 'konsyer' ? 'needs Konsyer to decide' : 'waiting for the seller to reply'}', style: t.bodySmall),
-          DisputeCard(d, loadPhoto: () => apiGetBytes('/admin/disputes/${d['id']}/photo', headers: _headers)),
+          DisputeCard(d, audience: DisputeAudience.admin, loadPhoto: () => apiGetBytes('/admin/disputes/${d['id']}/photo', headers: _headers)),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton(onPressed: _busy ? null : () => _resolve(d, 'refund'), child: const Text('Refund customer')),
