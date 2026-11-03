@@ -39,7 +39,18 @@ class _AdminScreenState extends State<AdminScreen> with AutoRefresh<AdminScreen>
   /// (the server busy, say) leaves what is on screen alone.
   @override
   Future<void> refresh() async {
-    if (_busy || _key.text.trim().isEmpty || (_rows.isEmpty && _disputes.isEmpty && _error != null)) return;
+    if (_busy) return;
+    // The lists are only for someone holding the key: empty the key and they disappear.
+    if (_key.text.trim().isEmpty) {
+      if (_rows.isNotEmpty || _disputes.isNotEmpty) {
+        setState(() {
+          _rows = [];
+          _disputes = [];
+        });
+      }
+      return;
+    }
+    if (_rows.isEmpty && _disputes.isEmpty && _error != null) return;
     try {
       final j = await apiGet('/admin/merchants', headers: _headers);
       final dj = await apiGet('/admin/disputes', headers: _headers);
@@ -48,7 +59,16 @@ class _AdminScreenState extends State<AdminScreen> with AutoRefresh<AdminScreen>
         _disputes = (dj['disputes'] as List).cast<Map<String, dynamic>>();
         _rows = (j['merchants'] as List).cast<Map<String, dynamic>>();
       });
-    } catch (_) {}
+    } catch (e) {
+      // A wrong or removed key must not leave the old lists on screen; any other error (server busy) keeps them.
+      if (mounted && e.toString().toLowerCase().contains('admin')) {
+        setState(() {
+          _rows = [];
+          _disputes = [];
+          _error = '$e';
+        });
+      }
+    }
   }
 
   Future<void> _load() async {
