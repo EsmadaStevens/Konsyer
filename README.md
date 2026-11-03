@@ -4,6 +4,8 @@
 
 > The model reads and recommends. Code enforces the rules, and people decide the money.
 
+**[Watch the 3-minute demo video](https://drive.google.com/file/d/1zs0pdRBlMZ8XxC7hRuCS4xVyEu9AfBtx/view?usp=sharing)**
+
 ```
 Red team: 14/14 attacks blocked. A fooled model cannot move money, break your budget, or refund anyone.
 (python -m scripts.red_team, no keys needed)
