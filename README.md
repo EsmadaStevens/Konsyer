@@ -4,6 +4,15 @@
 
 > The model reads and recommends. Code enforces the rules, and people decide the money.
 
+```
+Red team: 14/14 attacks blocked. A fooled model cannot move money, break your budget, or refund anyone.
+(python -m scripts.red_team, no keys needed)
+```
+
+| 1. Over the limit: blocked by code | 2. Booked: money held in escrow | 3. Wrong photo: a model recommends, a person decides |
+|---|---|---|
+| ![Booking over the K1,000 limit is blocked](docs/screenshots/1-blocked-over-limit.png) | ![Booking proposed within budget](docs/screenshots/2-booking-held.png) | ![Photo does not match the listing](docs/screenshots/3-dispute-mismatch.png) |
+
 Built solo by Esmada Stevens in Lusaka for the Meta Global AI Developer Hackathon (Indie track, "Build for Your World").
 
 Konsyer is a **web app** built with Flutter: you open it in a browser, on a computer or a phone. The repository also contains Flutter's standard `android/` and `ios/` project folders, because every Flutter project has them, so the same code can be built for phones. We have **not built or tested** the phone versions; this submission is the web version.
@@ -136,6 +145,8 @@ The API's own documentation is at `http://localhost:8000/docs` while the backend
 ## Known limits
 
 - **The photo check is a recommendation, not a verdict.** Close shades can be flagged: in our testing, a very pale pink tip was called a mismatch against "white tips". That is why a person decides every case, and nothing is refunded by the model.
+- **The photo check cannot tell whether a photo is genuine.** It compares what is in the picture with the listing; it cannot know that the photo was taken by this customer, for this booking. That is why the model only recommends, the seller can contest, and a person decides. Nothing in the roadmap below is built yet.
+- **No accounts or login.** One demo user acts as both the customer and the business owner, and a seller could book their own listing. Real accounts, and blocking self-booking, come first in production.
 - **The dispute window is short by design.** A problem that only shows up after the money is released (30 minutes after the service ends) cannot be disputed in this sandbox. A production version would need a longer window for some services, or a seller-funded appeal, and we have not built either.
 - The model sees the whole photo, including background; its description may mention things that don't matter.
 - Replay mode only covers recorded examples. The answers there are real model outputs recorded earlier.
@@ -159,6 +170,7 @@ Escrow, held payments, dispute evidence and business verification need a wallet 
 **Where we would start:** beauty services in Lusaka (for example nails and hair in Kabulonga and East Park), with a handful of salons, to test whether a prepaid customer who does not no-show is worth a fee to the seller. We have not run that test.
 
 
+- **Fraud protection for photo claims.** What a production version would add: an in-app camera capture, photo metadata checks, reverse image search, and tracking customers who dispute repeatedly.
 - A WhatsApp channel through the Meta Cloud API, so the concierge works where people already chat.
 - An appeal to a senior person for disputes the first reviewer decided.
 - Goods (not just services): returns and shipping.
