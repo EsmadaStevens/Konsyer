@@ -21,14 +21,14 @@ Konsyer is a **web app** built with Flutter: you open it in a browser, on a comp
 
 ## The problem
 
-In Zambia, a lot of everyday commerce happens in WhatsApp chats and Facebook pages. You find a salon or an event on a flyer, send a message, and then you are asked to pay a deposit to a number you have never used. If the nails come back the wrong colour, or nobody turns up, there is nobody to ask. Sellers have the opposite problem: no way to prove they are real, so honest businesses look the same as scammers.
+In Zambia, a lot of everyday commerce happens in WhatsApp chats and Facebook pages. You find a salon or an event on a flyer, send a message, and then you are asked to pay a deposit to a number you have never used. If the product comes in back the wrong colour, or nobody turns up, there is nobody to ask. Sellers have the opposite problem: no way to prove they are real, so honest businesses look the same as scammers.
 
 ## What Konsyer does
 
 1. **Plans with you.** Tell it what you want, your budget and your group size ("Saturday, 5 of us, K2,000, something active"). It searches listings, adds up the cost, and proposes a plan. It understands other languages too: a request in Bemba was understood, though the reply came back in English.
 2. **Never spends without you.** It can only *propose*. You tap Approve. Spending limits, your budget and the seller's trust level are checked by plain code, not by the model.
 3. **Holds your money.** A booking at a verified business is held in escrow. The business is paid 30 minutes after the service ends unless you object. You can cancel, accept a new time if the seller can't make it, or say something is wrong.
-4. **Checks disputes with a photo.** If the nails are not what was listed, you add a photo. A Meta vision model compares it with the listing and *recommends*. The seller can refund or contest; a Konsyer admin makes the final call. The photo is deleted when the case closes.
+4. **Checks disputes with a photo.** If the product is not what was listed, you add a photo. A Meta vision model compares it with the listing and *recommends*. The seller can refund or contest; a Konsyer admin makes the final call. The photo is deleted when the case closes.
 5. **Finds businesses that aren't on Konsyer.** If nobody registered offers what you want, it searches the web (Meta Model API) and shows unverified leads with the price hints it found, and drafts a message you send yourself. Leads are for contacting, never for paying.
 6. **Lets businesses join.** A business registers, then adds listings by typing them in or by uploading a flyer or a product photo, which a vision model turns into a draft the owner checks and edits. Konsyer verifies the business before customers see anything.
 
