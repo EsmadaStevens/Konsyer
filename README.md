@@ -38,7 +38,7 @@ In Zambia, a lot of everyday commerce happens in WhatsApp chats and Facebook pag
 2. Say: *"Plan a dinner for 4 people, my budget is K50."* The budget is enforced in code: nothing over K50 can be proposed or booked, however the request is worded.
 3. Approve a booking, then open the wallet and **Held payments**. Tap **Something is wrong**, then **It is not as described**, and upload `red_nails.jpg` from `backend/demo/images/`. The model flags a mismatch; the money stays held.
 4. The seller's side (the customer's photo, **Refund customer**, **Contest**) belongs to a business you register yourself: register one under **For businesses**, verify it in the admin console, list something, and book it. In replay mode the sample businesses have no owner, so that screen stays on the registration form; the case is still visible to the admin (next step).
-5. Open `/#/admin` in a second tab to see Konsyer's side: businesses to verify and cases to decide.
+5. Open `http://localhost:5000/#/admin` in a second tab to see Konsyer's side: businesses to verify and cases to decide.
 6. Open **Activity** (the timeline icon) to see which model did what, and what the rules and people decided.
 
 ## How it is built: who decides what
@@ -85,31 +85,33 @@ Keep that terminal open for the backend. Every new terminal needs the `activate`
 
 ### Option A: no keys needed (replay mode)
 
-Replay answers from a recording of the real models, so judges can run everything without any account. Only the recorded examples work; anything else says so plainly.
+Replay answers from a recording of the real models, so you can run everything without any account. Only the recorded examples work; anything else says so plainly. Replay is **on by default** in `.env.example`, so there is no environment variable to type, on any operating system.
+
+In `backend/`, with the virtual environment active:
 
 ```bash
-# in backend/
-cp .env.example .env              # on Windows: copy .env.example .env
-export KONSYER_REPLAY=demo/trace.jsonl     # Windows PowerShell: $env:KONSYER_REPLAY="demo\trace.jsonl"
+cp .env.example .env              # Windows (PowerShell or cmd): copy .env.example .env
 python -m uvicorn app.main:app --port 8000
 ```
 
-Then, in a second terminal at the project root:
+Open <http://127.0.0.1:8000>. It should say `"mode":"replay"`. (That page is the API; the app is the next step.)
+
+Then, in a **second terminal** at the project root:
 
 ```bash
 flutter pub get
-flutter run -d chrome --dart-define=API_BASE=http://localhost:8000
+flutter run -d chrome --web-port 5000 --dart-define=API_BASE=http://localhost:8000
 ```
 
-A "Replay mode" strip shows at the top of the chat. In replay mode, web search returns fictional "Sample" leads, and photos are matched by file name, so upload the pictures from `backend/demo/images/` (for example `red_nails.jpg`). Try the example requests in the walkthrough above.
+The app opens at <http://localhost:5000>. A "Replay mode" strip shows at the top of the chat. In replay mode, web search returns fictional "Sample" leads, and photos are matched by file name, so upload the pictures from `backend/demo/images/` (for example `red_nails.jpg`). Tap the example chips on the welcome screen, or try the walkthrough above.
 
 ### Option B: with your own model keys
 
-Put your keys in `backend/.env` (see `.env.example`): `LLM_API_KEY` for the agent and the photo checks, and `META_API_KEY` with `DISCOVERY_PROVIDER=meta` for real web search. Do not set `KONSYER_REPLAY`. Then run the same two commands as above. Web search takes 15 to 25 seconds, which is why replay is useful for demos.
+In `backend/.env`, fill in `LLM_API_KEY` (the agent and the photo checks) and, for real web search, `META_API_KEY` with `DISCOVERY_PROVIDER=meta`. Then **delete the `KONSYER_REPLAY=...` line**, or the app stays in replay mode. Restart the backend; <http://127.0.0.1:8000> should now say `"mode":"live"`. Web search takes 15 to 25 seconds, which is why replay is useful for demos.
 
 ### Admin console
 
-Open `http://localhost:<port>/#/admin` in its own tab and type the admin key from `.env` (`KONSYER_ADMIN_KEY`, set to `demo-admin-key` in `.env.example`). The key is typed each time and never stored. Add `--dart-define=DEMO=true` to the Flutter command to show a button that moves the clock forward, so you can see the automatic release without waiting.
+Open <http://localhost:5000/#/admin> in its own tab and type the admin key from `.env` (`KONSYER_ADMIN_KEY`, `demo-admin-key` in `.env.example`). The key is typed each time and never stored. Add `--dart-define=DEMO=true` to the Flutter command to show a button that moves the clock forward, so you can see the automatic release without waiting.
 
 ### Tests
 
