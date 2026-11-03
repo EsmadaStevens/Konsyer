@@ -241,3 +241,10 @@ def test_chat_offers_the_web_chip_only_after_a_listing_search_without_a_web_sear
     for tools, expected in ((["search_listings"], True), (["search_listings", "discover_services"], False), ([], False)):
         monkeypatch.setattr(main, "run_agent", fake(tools))
         assert client.post("/chat", json={"message": "hi", "user_id": 1, "history": []}).json()["suggest_web"] is expected
+
+
+def test_system_prompt_keeps_the_agent_on_topic():
+    from app.agent.prompts import system_prompt
+    from app.timeutil import lusaka_today
+    p = system_prompt(lusaka_today())
+    assert "only help with finding, planning" in p and "homework" in p
