@@ -6,7 +6,7 @@ import 'package:konsyer/models/chat_message.dart';
 
 class ChatBubble extends StatelessWidget {
   final Msg m;
-  const ChatBubble(this.m);
+  const ChatBubble(this.m, {super.key});
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;

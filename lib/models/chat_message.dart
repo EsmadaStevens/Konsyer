@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 class Msg {
   final bool fromUser;
   final String text;

@@ -23,10 +23,12 @@ class _ActivityScreenState extends State<ActivityScreen> {
   Future<void> _load() async {
     try {
       final j = await apiGet('/activity?user_id=$userId&limit=40');
-      if (mounted) setState(() {
-            _data = j;
-            _error = null;
-          });
+      if (mounted) {
+        setState(() {
+          _data = j;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -41,7 +43,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
 
   String _time(dynamic raw) {
     final s = (raw ?? '').toString();
-    final t = DateTime.tryParse(s.contains('T') ? s : s.replaceFirst(' ', 'T') + 'Z');
+    final t = DateTime.tryParse(s.contains('T') ? s : '${s.replaceFirst(' ', 'T')}Z');
     if (t == null) return s;
     final l = t.toUtc().add(const Duration(hours: 2)); // Lusaka (CAT)
     String two(int n) => n.toString().padLeft(2, '0');

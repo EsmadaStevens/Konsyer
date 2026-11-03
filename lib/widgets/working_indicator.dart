@@ -5,7 +5,7 @@ import 'package:konsyer/core/theme.dart';
 /// Shown while the agent works, so the screen never looks frozen. It says only what is true: it is working, and a web
 /// search can be slow. It does not pretend to know which step the agent is on.
 class WorkingIndicator extends StatefulWidget {
-  const WorkingIndicator();
+  const WorkingIndicator({super.key});
   @override
   State<WorkingIndicator> createState() => _WorkingIndicatorState();
 }
