@@ -146,6 +146,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _loading = true;
       _ctrl.clear();
     });
+    _scrollToEnd();
     try {
       final j = await apiPost('/chat', {'user_id': userId, 'message': text, 'history': history});
       final cards = (j['cards'] as List? ?? []).cast<Map<String, dynamic>>();
@@ -192,6 +193,14 @@ class _ChatScreenState extends State<ChatScreen> {
         ]),
       ),
     );
+  }
+
+  void _scrollToEnd() async {
+    await Future.delayed(const Duration(milliseconds: 60));
+    if (_scroll.hasClients) {
+      _scroll.animateTo(_scroll.position.maxScrollExtent + 200,
+          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    }
   }
 
   @override
@@ -245,8 +254,8 @@ class _ChatScreenState extends State<ChatScreen> {
               : ListView.builder(
                   controller: _scroll,
                   padding: const EdgeInsets.all(12),
-                  itemCount: _msgs.length,
-                  itemBuilder: (_, i) => _Bubble(_msgs[i]),
+                  itemCount: _msgs.length + (_loading ? 1 : 0),
+                  itemBuilder: (_, i) => i < _msgs.length ? _Bubble(_msgs[i]) : const _Working(),
                 ),
         ),
         if (_attn.isNotEmpty)
@@ -276,7 +285,6 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ),
-        if (_loading) const LinearProgressIndicator(minHeight: 2),
         if (!_loading && _msgs.isNotEmpty && _msgs.last.suggestWeb)
           Align(
             alignment: Alignment.centerLeft,
@@ -575,6 +583,61 @@ class _WalletScreenState extends State<WalletScreen> {
                       ),
                   ]),
                 ),
+    );
+  }
+}
+
+/// Shown while the agent works, so the screen never looks frozen. It says only what is true: it is working, and a web
+/// search can be slow. It does not pretend to know which step the agent is on.
+class _Working extends StatefulWidget {
+  const _Working();
+  @override
+  State<_Working> createState() => _WorkingState();
+}
+
+class _WorkingState extends State<_Working> {
+  Timer? _t;
+  int _n = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (mounted) setState(() => _n++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dots = '.' * (_n % 4);
+    final slow = _n >= 16; // after about 8 seconds
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: K.surface,
+          border: Border.all(color: K.border),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: K.gold)),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              slow ? 'Still working. A web search can take up to 30 seconds$dots' : 'Konsyer is working on it$dots',
+              style: const TextStyle(color: K.muted),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
