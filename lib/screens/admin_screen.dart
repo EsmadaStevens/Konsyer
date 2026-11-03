@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../api.dart';
-import '../dispute_card.dart';
-import '../photo_thumb.dart';
+import 'package:konsyer/cards/dispute_card.dart';
+import 'package:konsyer/core/api.dart';
+import 'package:konsyer/widgets/photo_thumb.dart';
 
 /// Konsyer admin: verify businesses and decide photo reviews. The admin key is typed here each time and never saved.
 /// A production version would live behind real admin sign-in, not in the customer app.

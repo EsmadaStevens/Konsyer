@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../api.dart';
-import '../theme.dart';
-import '../dispute_card.dart';
+import 'package:konsyer/cards/dispute_card.dart';
+import 'package:konsyer/core/api.dart';
+import 'package:konsyer/widgets/nav_actions.dart';
+import 'package:konsyer/core/theme.dart';
+import 'package:konsyer/widgets/pill.dart';
 
 /// "Held payments": money held in escrow between you and a seller (sandbox; a licensed payment partner in production).
 /// Sandbox money and simulated payouts: nothing real moves. Money reaches an unverified seller only when
@@ -388,7 +390,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
   Widget build(BuildContext context) {
     final rows = _rows;
     return Scaffold(
-      appBar: AppBar(title: const Text('Held payments')),
+      appBar: AppBar(title: Text('Held payments'), actions: navActions(context, NavTarget.wallet)),
       body: _error != null
           ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text('Could not load: $_error')))
           : rows == null

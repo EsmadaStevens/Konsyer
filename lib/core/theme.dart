@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 /// One place for how Konsyer looks. The colours are the ones the app already used (warm dark with gold);
 /// this file only gives them structure: surfaces, borders, rounded shapes, and toasts that match the app.
 class K {
-  static const bg = Color(0xFF15120B);
-  static const surface = Color(0xFF1F1B13);
-  static const surfaceHigh = Color(0xFF2A2518);
-  static const border = Color(0xFF3A3322);
+  static const bg = Color(0xFF000000);
+  static const surface = Color(0xFF14110A);
+  static const surfaceHigh = Color(0xFF211C10);
+  static const border = Color(0xFF2E2819);
   static const gold = Color(0xFFE2C26B);
   static const goldDeep = Color(0xFF6B5416);
   static const ok = Color(0xFF59D49A);
@@ -72,7 +72,7 @@ class K {
         backgroundColor: surface,
         side: const BorderSide(color: border),
         shape: shape12,
-        labelStyle: const TextStyle(fontSize: 13),
+        labelStyle: const TextStyle(fontSize: 13, color: Colors.white),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: surface,
@@ -97,31 +97,4 @@ class K {
       listTileTheme: const ListTileThemeData(iconColor: gold),
     );
   }
-}
-
-/// Keeps screen content in a readable column on a wide screen, centred; on a phone it changes nothing.
-class Body extends StatelessWidget {
-  final Widget child;
-  const Body({super.key, required this.child});
-  @override
-  Widget build(BuildContext context) =>
-      Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: K.maxWidth), child: child));
-}
-
-/// A small coloured label ("Held", "Verified seller", "Sample data").
-class Pill extends StatelessWidget {
-  final String text;
-  final Color color;
-  final IconData? icon;
-  const Pill(this.text, {super.key, this.color = K.muted, this.icon});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-            color: color.withAlpha(36), borderRadius: BorderRadius.circular(20), border: Border.all(color: color.withAlpha(120))),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[Icon(icon, size: 13, color: color), const SizedBox(width: 4)],
-          Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-        ]),
-      );
 }

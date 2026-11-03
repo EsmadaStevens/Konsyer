@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../api.dart';
-import '../dispute_card.dart';
-import '../photo_thumb.dart';
+import 'package:konsyer/cards/dispute_card.dart';
+import 'package:konsyer/core/api.dart';
+import 'package:konsyer/widgets/nav_actions.dart';
+import 'package:konsyer/core/theme.dart';
+import 'package:konsyer/widgets/photo_thumb.dart';
 
 String? _orNull(String s) => s.trim().isEmpty ? null : s.trim();
 
@@ -445,7 +447,7 @@ class _MerchantScreenState extends State<MerchantScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('For businesses')),
+      appBar: AppBar(title: Text('For businesses'), actions: navActions(context, NavTarget.business)),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
