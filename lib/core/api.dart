@@ -61,7 +61,7 @@ Future<Map<String, dynamic>> apiPost(String path, Map<String, dynamic> body,
   final r = await http
       .post(Uri.parse('$apiBase$path'),
           headers: {'Content-Type': 'application/json', ...?headers}, body: jsonEncode(body))
-      .timeout(const Duration(seconds: 60));
+      .timeout(const Duration(seconds: 150));
   return decodeResponse(r);
 }
 
