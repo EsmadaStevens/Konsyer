@@ -9,6 +9,13 @@ def _hermetic_database(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_model_env(monkeypatch):
+    """The shipped .env.example turns replay on; tests decide that for themselves, not the developer's .env."""
+    for name in ("KONSYER_REPLAY", "KONSYER_RECORD"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_discovery_env(monkeypatch):
     for name in ("KONSYER_DEMO_LEAD_PHONE", "DISCOVERY_SHOW_PHONES", "DISCOVERY_MAX_TOOL_CALLS",
                  "DISCOVERY_REASONING_EFFORT", "DISCOVERY_REQUIRE_CITED", "META_API_BASE", "META_SEARCH_MODEL"):
