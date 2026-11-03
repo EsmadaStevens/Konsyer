@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:konsyer/core/auto_refresh.dart';
 import 'package:konsyer/cards/dispute_card.dart';
 import 'package:konsyer/core/api.dart';
 import 'package:konsyer/widgets/nav_actions.dart';
@@ -15,7 +16,7 @@ class VouchersScreen extends StatefulWidget {
   State<VouchersScreen> createState() => _VouchersScreenState();
 }
 
-class _VouchersScreenState extends State<VouchersScreen> {
+class _VouchersScreenState extends State<VouchersScreen> with AutoRefresh<VouchersScreen> {
   List<Map<String, dynamic>>? _rows;
   String? _error;
   bool _busy = false;
@@ -31,6 +32,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
   void initState() {
     super.initState();
     _load();
+    startAutoRefresh();
   }
 
   void _toast(String m) {
@@ -38,6 +40,9 @@ class _VouchersScreenState extends State<VouchersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
     }
   }
+
+  @override
+  Future<void> refresh() => _load();
 
   Future<void> _load() async {
     try {

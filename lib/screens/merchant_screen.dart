@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:konsyer/core/auto_refresh.dart';
 import 'package:konsyer/cards/dispute_card.dart';
 import 'package:konsyer/core/api.dart';
 import 'package:konsyer/widgets/nav_actions.dart';
@@ -16,7 +17,7 @@ class MerchantScreen extends StatefulWidget {
   State<MerchantScreen> createState() => _MerchantScreenState();
 }
 
-class _MerchantScreenState extends State<MerchantScreen> {
+class _MerchantScreenState extends State<MerchantScreen> with AutoRefresh<MerchantScreen> {
   Map<String, dynamic>? merchant;
   List<Map<String, dynamic>> bookings = [];
   bool loading = true;
@@ -31,11 +32,15 @@ class _MerchantScreenState extends State<MerchantScreen> {
   void initState() {
     super.initState();
     _load();
+    startAutoRefresh();
   }
 
   void _toast(String m) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
+
+  @override
+  Future<void> refresh() => _load();
 
   Future<void> _load() async {
     try {

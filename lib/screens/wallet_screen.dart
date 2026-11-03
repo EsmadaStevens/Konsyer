@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:konsyer/core/auto_refresh.dart';
 import 'package:konsyer/core/api.dart';
 import 'package:konsyer/widgets/nav_actions.dart';
 import 'package:konsyer/screens/vouchers_screen.dart';
@@ -9,7 +10,7 @@ class WalletScreen extends StatefulWidget {
   State<WalletScreen> createState() => _WalletScreenState();
 }
 
-class _WalletScreenState extends State<WalletScreen> {
+class _WalletScreenState extends State<WalletScreen> with AutoRefresh<WalletScreen> {
   Map<String, dynamic>? w;
   String? error;
   bool busy = false;
@@ -18,7 +19,11 @@ class _WalletScreenState extends State<WalletScreen> {
   void initState() {
     super.initState();
     _load();
+    startAutoRefresh();
   }
+
+  @override
+  Future<void> refresh() => _load();
 
   Future<void> _load() async {
     try {

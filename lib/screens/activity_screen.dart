@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:konsyer/core/auto_refresh.dart';
 import 'package:konsyer/core/api.dart';
 import 'package:konsyer/widgets/nav_actions.dart';
 
@@ -10,7 +11,7 @@ class ActivityScreen extends StatefulWidget {
   State<ActivityScreen> createState() => _ActivityScreenState();
 }
 
-class _ActivityScreenState extends State<ActivityScreen> {
+class _ActivityScreenState extends State<ActivityScreen> with AutoRefresh<ActivityScreen> {
   Map<String, dynamic>? _data;
   String? _error;
 
@@ -18,7 +19,11 @@ class _ActivityScreenState extends State<ActivityScreen> {
   void initState() {
     super.initState();
     _load();
+    startAutoRefresh();
   }
+
+  @override
+  Future<void> refresh() => _load();
 
   Future<void> _load() async {
     try {

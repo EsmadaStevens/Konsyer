@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:konsyer/core/auto_refresh.dart';
 import 'package:konsyer/cards/dispute_card.dart';
 import 'package:konsyer/core/api.dart';
 import 'package:konsyer/widgets/photo_thumb.dart';
@@ -15,7 +16,7 @@ class AdminScreen extends StatefulWidget {
 /// Clock controls exist only in recording builds: flutter run --dart-define=DEMO=true
 const _demo = bool.fromEnvironment('DEMO');
 
-class _AdminScreenState extends State<AdminScreen> {
+class _AdminScreenState extends State<AdminScreen> with AutoRefresh<AdminScreen> {
   final _key = TextEditingController();
   List<Map<String, dynamic>> _rows = [];
   List<Map<String, dynamic>> _disputes = [];
@@ -26,6 +27,28 @@ class _AdminScreenState extends State<AdminScreen> {
 
   void _toast(String m) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    startAutoRefresh();
+  }
+
+  /// Once the key has been typed and the lists loaded, keep them current. Quiet: no "Working..." flicker, and an error
+  /// (the server busy, say) leaves what is on screen alone.
+  @override
+  Future<void> refresh() async {
+    if (_busy || _key.text.trim().isEmpty || (_rows.isEmpty && _disputes.isEmpty && _error != null)) return;
+    try {
+      final j = await apiGet('/admin/merchants', headers: _headers);
+      final dj = await apiGet('/admin/disputes', headers: _headers);
+      if (!mounted) return;
+      setState(() {
+        _disputes = (dj['disputes'] as List).cast<Map<String, dynamic>>();
+        _rows = (j['merchants'] as List).cast<Map<String, dynamic>>();
+      });
+    } catch (_) {}
   }
 
   Future<void> _load() async {
