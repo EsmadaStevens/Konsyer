@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'api.dart';
-import 'contact_card.dart';
+import 'package:konsyer/cards/contact_card.dart';
+import 'package:konsyer/core/api.dart';
 
 /// Web leads, drawn from the data by the app (not from the model's wording), so a price hint
 /// always shows exactly as the page worded it. Every lead is UNVERIFIED. Nothing is sent:

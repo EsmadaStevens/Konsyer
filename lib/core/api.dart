@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:konsyer/core/theme.dart';
 
 // Set with: --dart-define=API_BASE=http://localhost:8000
 // (Android emulator: http://10.0.2.2:8000)

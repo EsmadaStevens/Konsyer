@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../api.dart';
+import 'package:konsyer/core/api.dart';
+import 'package:konsyer/widgets/nav_actions.dart';
 
 /// "Activity": what each Meta model did, and who acted on each step (model, rule, person).
 /// Model calls are metadata only (job, model, time). Prompts, photos and answers are never stored.
@@ -82,7 +83,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
     final t = Theme.of(context).textTheme;
     final d = _data;
     return Scaffold(
-      appBar: AppBar(title: const Text('Activity')),
+      appBar: AppBar(title: Text('Activity'), actions: navActions(context, NavTarget.activity)),
       body: _error != null
           ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text('Could not load: $_error')))
           : d == null
