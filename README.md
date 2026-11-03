@@ -103,7 +103,7 @@ flutter pub get
 flutter run -d chrome --web-port 5000 --dart-define=API_BASE=http://localhost:8000
 ```
 
-The app opens at <http://localhost:5000>. A "Replay mode" strip shows at the top of the chat. In replay mode, web search returns fictional "Sample" leads, and photos are matched by file name, so upload the pictures from `backend/demo/images/` (for example `red_nails.jpg`). Tap the example chips on the welcome screen, or try the walkthrough above.
+The app opens at <http://localhost:5000>. The first load, and any browser refresh, can be slow in this development mode (the screen stays black while it loads). Add `--release` to the Flutter command for a build that loads in a second or two; it takes longer to build the first time. A "Replay mode" strip shows at the top of the chat. In replay mode, web search returns fictional "Sample" leads, and photos are matched by file name, so upload the pictures from `backend/demo/images/` (for example `red_nails.jpg`). Tap the example chips on the welcome screen, or try the walkthrough above.
 
 ### Option B: with your own model keys
 
