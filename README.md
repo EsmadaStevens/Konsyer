@@ -136,6 +136,8 @@ The API's own documentation is at `http://localhost:8000/docs` while the backend
 ## Known limits
 
 - **The photo check is a recommendation, not a verdict.** Close shades can be flagged: in our testing, a very pale pink tip was called a mismatch against "white tips". That is why a person decides every case, and nothing is refunded by the model.
+- **The photo check cannot tell whether a photo is genuine.** It compares what is in the picture with the listing; it cannot know that the photo was taken by this customer, for this booking. That is why the model only recommends, the seller can contest, and a person decides. Nothing in the roadmap below is built yet.
+- **No accounts or login.** One demo user acts as both the customer and the business owner, and a seller could book their own listing. Real accounts, and blocking self-booking, come first in production.
 - **The dispute window is short by design.** A problem that only shows up after the money is released (30 minutes after the service ends) cannot be disputed in this sandbox. A production version would need a longer window for some services, or a seller-funded appeal, and we have not built either.
 - The model sees the whole photo, including background; its description may mention things that don't matter.
 - Replay mode only covers recorded examples. The answers there are real model outputs recorded earlier.
@@ -159,6 +161,7 @@ Escrow, held payments, dispute evidence and business verification need a wallet 
 **Where we would start:** beauty services in Lusaka (for example nails and hair in Kabulonga and East Park), with a handful of salons, to test whether a prepaid customer who does not no-show is worth a fee to the seller. We have not run that test.
 
 
+- **Fraud protection for photo claims.** What a production version would add: an in-app camera capture, photo metadata checks, reverse image search, and tracking customers who dispute repeatedly.
 - A WhatsApp channel through the Meta Cloud API, so the concierge works where people already chat.
 - An appeal to a senior person for disputes the first reviewer decided.
 - Goods (not just services): returns and shipping.
